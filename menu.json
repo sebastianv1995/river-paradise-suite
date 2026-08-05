@@ -1,0 +1,288 @@
+{
+  "Desayunos": [
+    {
+      "id": "d1",
+      "name": "Campestre",
+      "desc": "Sanduche, jugo, huevos rancheros, fruta",
+      "price": 5
+    },
+    {
+      "id": "d2",
+      "name": "Tigrillo",
+      "desc": "Verde molido, bistec de carne, huevo frito",
+      "price": 6
+    }
+  ],
+  "Platos fuertes": [
+    {
+      "id": "p1",
+      "name": "Tomahawk 350 gr",
+      "desc": "Papas a la francesa, salteado de vegetales",
+      "price": 15
+    },
+    {
+      "id": "p4",
+      "name": "T-Bone 350 gr",
+      "desc": "Papas a la francesa, salteado de vegetales",
+      "price": 12
+    },
+    {
+      "id": "p5",
+      "name": "Picaña 250 gr",
+      "desc": "Papas a la francesa, salteado de vegetales",
+      "price": 14
+    },
+    {
+      "id": "p6",
+      "name": "Ribeye 300 gr",
+      "desc": "Papas a la francesa, salteado de vegetales",
+      "price": 15
+    },
+    {
+      "id": "p7",
+      "name": "Lomo en salsa",
+      "desc": "Salsa de tocino, champiñones, curry",
+      "price": 15
+    },
+    {
+      "id": "p9",
+      "name": "Bife de res 250 gr",
+      "desc": "Cama de puré de papa, salsa de la casa",
+      "price": 15
+    },
+    {
+      "id": "p10",
+      "name": "Lomo fino de cerdo",
+      "desc": "Medallones de cerdo en salsa de mora",
+      "price": 12
+    },
+    {
+      "id": "p8",
+      "name": "Costillas",
+      "desc": "Salsa BBQ, mostaza y miel, chimichurri",
+      "price": 10
+    },
+    {
+      "id": "p11",
+      "name": "Ceviche de pescado",
+      "desc": "Chifles, tostado",
+      "price": 8
+    },
+    {
+      "id": "p12",
+      "name": "Ceviche de camarón",
+      "desc": "Chifles, tostado",
+      "price": 8
+    },
+    {
+      "id": "p13",
+      "name": "Ceviche mixto",
+      "desc": "Chifles, tostado",
+      "price": 10
+    },
+    {
+      "id": "a1",
+      "name": "Tablita River",
+      "desc": "Carne, pollo, chorizo y papas fritas, ensalada fría",
+      "price": 12
+    },
+    {
+      "id": "p14",
+      "name": "Filete de pollo",
+      "desc": "Con papas fritas, ensalada fría y salsa",
+      "price": 8
+    }
+  ],
+  "Ideales para compartir": [
+    {
+      "id": "a2",
+      "name": "Volquetero",
+      "desc": "Atún, tostado, chochos, chifles y curtido",
+      "price": 7
+    },
+    {
+      "id": "c5",
+      "name": "Nachos",
+      "desc": "Con queso, guacamole y pico de gallo",
+      "price": 4.5
+    },
+    {
+      "id": "c2",
+      "name": "Porción de yucas",
+      "desc": "Fritas",
+      "price": 3
+    },
+    {
+      "id": "c8",
+      "name": "Porción de empanadas",
+      "desc": "2 empanadas de queso",
+      "price": 3
+    },
+    {
+      "id": "c9",
+      "name": "Porción de patacones",
+      "desc": "Con queso",
+      "price": 3
+    },
+    {
+      "id": "c6",
+      "name": "Tostada",
+      "desc": "Queso - jamón",
+      "price": 1.5
+    },
+    {
+      "id": "c7",
+      "name": "Tostada",
+      "desc": "Mixta",
+      "price": 2
+    }
+  ],
+  "Bebidas calientes": [
+    {
+      "id": "b1",
+      "name": "Café pasado",
+      "desc": "",
+      "price": 1
+    },
+    {
+      "id": "b2",
+      "name": "Taza de té",
+      "desc": "Cedrón, manzanilla, hierba luisa",
+      "price": 1
+    },
+    {
+      "id": "b3",
+      "name": "Leche con chocolate",
+      "desc": "",
+      "price": 2
+    }
+  ],
+  "Bebidas sin alcohol": [
+    {
+      "id": "b4",
+      "name": "Batido",
+      "desc": "Mora, fresa, banana, mango, guanábana",
+      "price": 3
+    },
+    {
+      "id": "b5",
+      "name": "Jugo natural",
+      "desc": "Mora, maracuyá, piña, sandía, limón",
+      "price": 2
+    },
+    {
+      "id": "s1",
+      "name": "Agua Splendor 500 ml",
+      "desc": "",
+      "price": 1,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "s2",
+      "name": "Agua Dasani 500 ml",
+      "desc": "",
+      "price": 1,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "s3",
+      "name": "Güitig 500 ml",
+      "desc": "",
+      "price": 1.25,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "s4",
+      "name": "Coca-Cola 500 ml",
+      "desc": "",
+      "price": 1.5,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "s5",
+      "name": "Sprite 500 ml",
+      "desc": "",
+      "price": 1.5,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "s6",
+      "name": "Fiora 500 ml",
+      "desc": "",
+      "price": 1.5,
+      "track_stock": true,
+      "stock_min": 6
+    }
+  ],
+  "Bebidas con alcohol": [
+    {
+      "id": "b7",
+      "name": "Michelada",
+      "desc": "Maracuyá o limón",
+      "price": 5
+    },
+    {
+      "id": "a10",
+      "name": "Club 550 ml",
+      "desc": "",
+      "price": 3.5,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "a11",
+      "name": "Heineken 600 ml",
+      "desc": "",
+      "price": 3.5,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "a12",
+      "name": "Corona 330 ml",
+      "desc": "",
+      "price": 3,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "a13",
+      "name": "Modelo 355 ml",
+      "desc": "",
+      "price": 3,
+      "track_stock": true,
+      "stock_min": 6
+    },
+    {
+      "id": "a14",
+      "name": "Vinos",
+      "desc": "Botella",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2
+    },
+    {
+      "id": "a15",
+      "name": "Combo Heineken",
+      "desc": "3 cervezas Heineken 600 ml",
+      "price": 10,
+      "stock_components": [
+        { "item_id": "a11", "quantity": 3 }
+      ]
+    },
+    {
+      "id": "a16",
+      "name": "Combo Club",
+      "desc": "3 cervezas Club 550 ml",
+      "price": 10,
+      "stock_components": [
+        { "item_id": "a10", "quantity": 3 }
+      ]
+    }
+  ]
+}

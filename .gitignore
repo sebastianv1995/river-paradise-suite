@@ -1,0 +1,19 @@
+# Dependencies and generated builds
+node_modules/
+dist/
+
+# Local operational database and temporary writes
+backend/river_paradise.json
+backend/river_paradise.json.tmp
+
+# Local configuration and logs
+.env
+.env.*
+*.log
+npm-debug.log*
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
