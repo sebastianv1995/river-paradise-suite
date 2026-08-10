@@ -65,7 +65,7 @@ input:focus { border-color: var(--amber) !important; box-shadow: 0 0 0 3px rgba(
 .inventory-card { box-shadow:0 1px 2px rgba(0,0,0,.03); transition:transform .15s, box-shadow .15s; }
 .inventory-card:hover { transform:translateY(-1px); box-shadow:0 5px 16px rgba(0,0,0,.06); }
 .field-group { display:flex; flex-direction:column; gap:3px; min-width:0; }
-.field-group > span { display:none; font-size:10px; color:var(--text3); font-weight:600; text-transform:uppercase; }
+.field-group > span { display:block; font-size:10px; color:var(--text3); font-weight:600; text-transform:uppercase; }
 .payment-methods { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; margin-bottom:10px; }
 .payment-option { min-height:58px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border:1px solid var(--border); border-radius:9px; background:#fff; color:var(--text2); font-size:10px; }
 .payment-option span:first-child { font-size:19px; }
@@ -220,6 +220,21 @@ input:focus { border-color: var(--amber) !important; box-shadow: 0 0 0 3px rgba(
 }
 
 /* Scrollbar */
+@keyframes productAdded {
+  0% { transform:scale(1); }
+  45% { transform:scale(.97); background:#e4f4e8; border-color:var(--green); }
+  100% { transform:scale(1); }
+}
+.menu-product.is-adding { animation:productAdded .38s ease; }
+.menu-product.in-order { border-color:rgba(43,122,75,.28) !important; }
+.menu-product:disabled { opacity:.72; }
+.menu-quantity { padding:2px 6px; border-radius:10px; background:var(--green-light); color:var(--green); font-size:10px; font-weight:600; white-space:nowrap; }
+.menu-added-feedback { margin:10px 16px 0; padding:9px 11px; display:flex; align-items:center; gap:9px; border-radius:9px; background:var(--green-light); color:var(--green); animation:productAdded .38s ease; }
+.menu-added-feedback > span { width:24px; height:24px; display:grid; place-items:center; border-radius:50%; background:var(--green); color:white; font-weight:bold; }
+.menu-added-feedback div { display:flex; flex-direction:column; font-size:12px; }.menu-added-feedback small { opacity:.8; }
+.menu-order-summary { margin:8px 16px 14px; padding:10px 12px; display:flex; justify-content:space-between; border:0; border-radius:9px; background:var(--amber); color:white; cursor:pointer; }
+.payment-scroll-area { scrollbar-gutter:stable; -webkit-overflow-scrolling:touch; touch-action:pan-y; }
+
 ::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 2px; }

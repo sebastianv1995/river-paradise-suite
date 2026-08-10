@@ -4,7 +4,7 @@
       "id": "d1",
       "name": "Campestre",
       "desc": "Sanduche, jugo, huevos rancheros, fruta",
-      "price": 5
+      "price": 6
     },
     {
       "id": "d2",
@@ -90,6 +90,18 @@
       "id": "p14",
       "name": "Filete de pollo",
       "desc": "Con papas fritas, ensalada fría y salsa",
+      "price": 8
+    },
+    {
+      "id": "prod_msnodbwc_8brb",
+      "name": "Caldo de Gallina",
+      "desc": "Gallina Criolla",
+      "price": 8
+    },
+    {
+      "id": "prod_msnodwyz_abkd",
+      "name": "Trucha Asada",
+      "desc": "Plato tipico",
       "price": 8
     }
   ],
@@ -219,6 +231,28 @@
       "stock_min": 6
     }
   ],
+  "Tabacos": [
+    {
+      "id": "tab_lark",
+      "name": "Lark",
+      "desc": "Venta por unidad; caja de 10 cigarrillos",
+      "price": 0.5,
+      "track_stock": true,
+      "stock_min": 10,
+      "package_size": 10,
+      "inventory_section": "tabacos"
+    },
+    {
+      "id": "tab_marlboro",
+      "name": "Marlboro",
+      "desc": "Venta por unidad; caja de 10 cigarrillos",
+      "price": 0.5,
+      "track_stock": true,
+      "stock_min": 10,
+      "package_size": 10,
+      "inventory_section": "tabacos"
+    }
+  ],
   "Bebidas con alcohol": [
     {
       "id": "b7",
@@ -272,7 +306,10 @@
       "desc": "3 cervezas Heineken 600 ml",
       "price": 10,
       "stock_components": [
-        { "item_id": "a11", "quantity": 3 }
+        {
+          "item_id": "a11",
+          "quantity": 3
+        }
       ]
     },
     {
@@ -281,7 +318,10 @@
       "desc": "3 cervezas Club 550 ml",
       "price": 10,
       "stock_components": [
-        { "item_id": "a10", "quantity": 3 }
+        {
+          "item_id": "a10",
+          "quantity": 3
+        }
       ]
     }
   ]

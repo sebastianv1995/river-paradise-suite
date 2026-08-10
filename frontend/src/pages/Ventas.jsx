@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { printSaleReceipt } from '../utils/printTicket.js';
 
 const fmt = n => '$' + Number(n).toFixed(2);
 
@@ -54,6 +55,10 @@ export default function Ventas({ location }) {
            }}>
           ⬇ Exportar Excel
         </a>
+        <a href={`/api/export/solicitudes-factura?fecha=${encodeURIComponent(fecha)}&location=${location}`}
+           style={{ padding:'6px 14px', borderRadius:8, border:'1px solid var(--amber)', fontSize:12, color:'var(--amber)', textDecoration:'none', background:'var(--amber-light)', fontWeight:500, marginLeft:8 }}>
+          Descargar solicitudes de factura
+        </a>
       </div>
 
       {/* List */}
@@ -76,7 +81,7 @@ export default function Ventas({ location }) {
             }}>
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:3 }}>
-                  <span style={{ fontWeight:600, fontSize:13 }}>Mesa {v.mesa_numero || v.mesa_id}</span>
+                  <span style={{ fontWeight:600, fontSize:13 }}>{v.source === 'cuenta' ? `Cuenta · Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`}</span>
                   <span style={{
                     fontSize:11, padding:'1px 8px', borderRadius:6,
                     background:'var(--teal-light)', color:'var(--teal)',
@@ -94,9 +99,15 @@ export default function Ventas({ location }) {
                     {v.items.map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', ')}
                   </div>
                 )}
+                {v.invoice_requested && <div style={{ fontSize:11, color:'var(--amber)', marginTop:4 }}>
+                  Factura solicitada: {v.customer_name} · {v.customer_tax_id} · {v.customer_city}
+                </div>}
               </div>
-              <div style={{ fontWeight:600, fontSize:15, color:'var(--green)', whiteSpace:'nowrap', marginLeft:12 }}>
-                {fmt(v.total)}
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginLeft:12 }}>
+                <button onClick={() => printSaleReceipt(v, location)} style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'#fff', fontSize:11, cursor:'pointer' }}>
+                  Imprimir respaldo
+                </button>
+                <div style={{ fontWeight:600, fontSize:15, color:'var(--green)', whiteSpace:'nowrap' }}>{fmt(v.total)}</div>
               </div>
             </div>
           ))}

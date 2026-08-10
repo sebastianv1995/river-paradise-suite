@@ -86,6 +86,11 @@ cuántas quedan. Al confirmar el pago de una mesa, las unidades vendidas se
 descuentan automáticamente. Si no existe stock suficiente, el pago no se confirma
 y el sistema informa qué producto falta.
 
+Si existe una diferencia por conteo, merma o un registro equivocado, usar
+**Corregir stock**. Se escribe una cantidad positiva para sumar o negativa para
+restar y un motivo obligatorio. El ajuste queda visible en el historial y nunca
+puede dejar las existencias en negativo.
+
 ## Caja chica y comprobantes
 
 La pestaña **Caja chica** permite registrar ingresos y egresos de efectivo con su
@@ -103,6 +108,12 @@ comprobante; no es necesario guardar una fotografía.
 Cada Excel del cierre incluye cinco hojas: resumen financiero, detalle de ventas,
 top productos, movimientos de caja chica y cobros de cuentas pendientes.
 
+Los archivos Excel descargados se entregan con sus hojas protegidas para consulta:
+permiten observar y usar los filtros, pero bloquean la edición, eliminación e
+inserción de datos. Esta protección evita cambios accidentales; como cualquier
+protección de Excel, no sustituye un PDF cuando se necesita un documento final
+que no esté pensado para manipularse.
+
 ## Reportes generales
 
 La pestaña **Reportes** permite consultar hoy, la semana actual, el mes actual o
@@ -119,6 +130,17 @@ permite acumular consumos, registrar pagos totales o parciales y convertir un
 saldo en consumo interno dejando registrado el motivo. Los cobros posteriores
 se incluyen en el cierre y los reportes según su forma de pago.
 
+Al abrir una cuenta pendiente se puede usar **Agregar consumo** para seleccionar
+nuevos productos sin registrar un pago. El consumo se suma a la estadía, conserva
+el detalle de productos y descuenta inventario. **Descargar estado de cuenta**
+genera un Excel protegido para recepción con huésped, habitación, consumos,
+pagos y saldo. Cada cuenta tiene identificadores de estadía y reserva preparados
+para conectarse posteriormente con un sistema hotelero.
+
+El botón **Descargar todas las pendientes** genera para recepción un Excel general
+con todos los huéspedes que mantienen saldo, un resumen por habitación y una hoja
+adicional con el detalle de todos los productos consumidos.
+
 ---
 
 ## Modificar el menú
@@ -126,6 +148,29 @@ se incluyen en el cierre y los reportes según su forma de pago.
 En el sistema, abrir la pestaña **Carta**. Cambiar el nombre, la descripción o el
 precio de cualquier producto y pulsar **Guardar**. Los cambios se aplican a los
 nuevos pedidos; las ventas y pedidos ya registrados conservan sus datos originales.
+
+En la parte superior de **Carta** también se pueden crear productos. Al marcar
+**Controlar stock**, el producto aparece automáticamente en **Inventario**, donde
+se registra la primera entrada y las entregas posteriores.
+
+## Impresión de comandas y comprobantes
+
+- En una mesa ocupada, usar **Imprimir comanda de cocina** para imprimir el pedido
+  actual en papel térmico (recomendado: 80 mm) o en una impresora normal.
+- En **Ventas**, usar **Imprimir respaldo** para entregar al cliente un comprobante
+  del consumo y forma de pago. Se puede imprimir en papel o guardar como PDF.
+- Al confirmar un pago o una carga a cuenta, el comprobante se abre automáticamente
+  para imprimir. Incluye cantidad, producto, precio unitario, subtotal y total,
+  además de los datos para factura o la indicación **Consumidor final**.
+- Durante el cobro se puede marcar **El cliente solicita factura** y registrar
+  nombre o razón social, RUC/cédula y ciudad. La información queda almacenada con
+  la venta. En **Ventas**, el botón **Descargar solicitudes de factura** genera el
+  Excel diario para la contadora con los datos del cliente, fecha y consumo.
+
+El comprobante del sistema es un respaldo de compra y no una factura electrónica
+autorizada. Para emitir factura tributaria se debe integrar un proveedor de
+facturación electrónica autorizado y registrar los datos fiscales del negocio y
+del cliente.
 
 ---
 

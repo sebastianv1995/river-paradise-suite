@@ -6,7 +6,8 @@ export default function Inventario() {
   const [products, setProducts] = useState([]);
   const [movements, setMovements] = useState([]);
   const [quantities, setQuantities] = useState({});
-  const [notes, setNotes] = useState({});
+  const [adjustments, setAdjustments] = useState({});
+  const [adjustmentNotes, setAdjustmentNotes] = useState({});
   const [saving, setSaving] = useState(null);
   const [message, setMessage] = useState('');
 
@@ -31,12 +32,11 @@ export default function Inventario() {
     try {
       const response = await fetch(`/api/inventory/${product.id}/entries`, {
         method:'POST', headers:{ 'Content-Type':'application/json' },
-        body:JSON.stringify({ quantity:Number(quantities[product.id]), note:notes[product.id] || '' }),
+        body:JSON.stringify({ quantity:Number(quantities[product.id]) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo registrar la entrada');
       setQuantities(current => ({ ...current, [product.id]:'' }));
-      setNotes(current => ({ ...current, [product.id]:'' }));
       setMessage(`✓ Entrada registrada. Ahora quedan ${result.stock} unidades de ${product.name}.`);
       await load();
     } catch (error) {
@@ -44,6 +44,65 @@ export default function Inventario() {
     } finally {
       setSaving(null);
     }
+  }
+
+  async function adjustStock(product) {
+    setSaving(`adjust-${product.id}`);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/inventory/${product.id}/adjustments`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ quantity:Number(adjustments[product.id]), note:adjustmentNotes[product.id] || '' }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'No se pudo ajustar el inventario');
+      setAdjustments(current => ({ ...current, [product.id]:'' }));
+      setAdjustmentNotes(current => ({ ...current, [product.id]:'' }));
+      setMessage(`✓ Stock corregido. Ahora quedan ${result.stock} unidades de ${product.name}.`);
+      await load();
+    } catch (error) {
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  function renderProduct(product) {
+    const low = product.stock <= product.stock_min;
+    const byBoxes = product.package_size > 1;
+    return <div className="inventory-card" key={product.id} style={{ background:'#fff', border:`1px solid ${low ? 'var(--coral)' : 'var(--border)'}`, borderRadius:12, padding:14 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:10 }}>
+        <div>
+          <div style={{ fontWeight:600, fontSize:14 }}>{product.name}</div>
+          <div style={{ fontSize:11, color:low ? 'var(--coral)' : 'var(--text3)' }}>
+            {low ? `Stock bajo · mínimo ${product.stock_min}` : `Mínimo ${product.stock_min}`}
+          </div>
+          {byBoxes && <div style={{ fontSize:11, color:'var(--amber)', marginTop:2 }}>1 caja = {product.package_size} cigarrillos</div>}
+        </div>
+        <div style={{ textAlign:'right' }}><div style={{ fontSize:26, lineHeight:1, fontWeight:600, color:low ? 'var(--coral)' : 'var(--green)' }}>{product.stock}</div><div style={{ fontSize:10, color:'var(--text3)' }}>unidades disponibles</div></div>
+      </div>
+      <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+        <Metric label="Ingresaron" value={product.received}/><Metric label="Vendidos" value={product.sold}/><Metric label="Quedan" value={product.stock}/>
+      </div>
+      <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', marginBottom:5 }}>{byBoxes ? 'Registrar entrada por cajas' : 'Registrar nueva entrada'}</div>
+      <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'1fr 100px', gap:6 }}>
+        <input aria-label={`Cantidad recibida de ${product.name}`} type="number" min="1" step="1" placeholder={byBoxes ? 'Nº de cajas' : 'Cantidad'} value={quantities[product.id] || ''}
+          onChange={e => setQuantities(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+        <button disabled={!Number(quantities[product.id]) || saving === product.id} onClick={() => addEntry(product)} style={buttonStyle}>{saving === product.id ? '…' : 'Ingresar'}</button>
+      </div>
+      {byBoxes && Number(quantities[product.id]) > 0 && <div style={{ fontSize:11, color:'var(--green)', marginTop:5 }}>
+        Se agregarán {Number(quantities[product.id]) * product.package_size} cigarrillos al inventario.
+      </div>}
+      <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', margin:'12px 0 5px' }}>Corregir stock por unidades</div>
+      <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 78px', gap:6 }}>
+        <input aria-label={`Ajuste de ${product.name}`} type="number" step="1" placeholder="+ / −" value={adjustments[product.id] || ''}
+          onChange={e => setAdjustments(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+        <input aria-label={`Motivo del ajuste de ${product.name}`} required maxLength={200} placeholder="Motivo obligatorio" value={adjustmentNotes[product.id] || ''}
+          onChange={e => setAdjustmentNotes(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+        <button disabled={!Number.isInteger(Number(adjustments[product.id])) || Number(adjustments[product.id]) === 0 || !adjustmentNotes[product.id]?.trim() || saving === `adjust-${product.id}`}
+          onClick={() => adjustStock(product)} style={{ ...buttonStyle, background:'var(--teal)' }}>{saving === `adjust-${product.id}` ? '…' : 'Ajustar'}</button>
+      </div>
+    </div>;
   }
 
   return (
@@ -65,45 +124,24 @@ export default function Inventario() {
         <SummaryCard label="Productos con stock bajo" value={lowStock} tone={lowStock ? 'coral' : 'green'} />
       </div>
 
+      <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', margin:'18px 0 8px' }}>Bebidas y otros productos</div>
       <div className="inventory-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
-        {products.map(product => {
-          const low = product.stock <= product.stock_min;
-          return <div className="inventory-card" key={product.id} style={{ background:'#fff', border:`1px solid ${low ? 'var(--coral)' : 'var(--border)'}`, borderRadius:12, padding:14 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:10 }}>
-              <div>
-                <div style={{ fontWeight:600, fontSize:14 }}>{product.name}</div>
-                <div style={{ fontSize:11, color:low ? 'var(--coral)' : 'var(--text3)' }}>
-                  {low ? `Stock bajo · mínimo ${product.stock_min}` : `Mínimo ${product.stock_min}`}
-                </div>
-              </div>
-              <div style={{ textAlign:'right' }}><div style={{ fontSize:26, lineHeight:1, fontWeight:600, color:low ? 'var(--coral)' : 'var(--green)' }}>{product.stock}</div><div style={{ fontSize:10, color:'var(--text3)' }}>disponibles</div></div>
-            </div>
-            <div style={{ display:'flex', gap:6, marginBottom:10 }}>
-              <Metric label="Ingresaron" value={product.received}/>
-              <Metric label="Vendidos" value={product.sold}/>
-              <Metric label="Quedan" value={product.stock}/>
-            </div>
-            <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', marginBottom:5 }}>Registrar nueva entrada</div>
-            <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 78px', gap:6 }}>
-              <input aria-label={`Cantidad recibida de ${product.name}`} type="number" min="1" step="1" placeholder="Cantidad" value={quantities[product.id] || ''}
-                onChange={e => setQuantities(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-              <input aria-label={`Nota para ${product.name}`} placeholder="Proveedor o nota" value={notes[product.id] || ''}
-                onChange={e => setNotes(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-              <button disabled={!Number(quantities[product.id]) || saving === product.id} onClick={() => addEntry(product)} style={buttonStyle}>
-                {saving === product.id ? '…' : 'Ingresar'}
-              </button>
-            </div>
-          </div>;
-        })}
+        {products.filter(product => product.inventory_section !== 'tabacos').map(renderProduct)}
+      </div>
+
+      <div style={{ fontSize:14, fontWeight:700, color:'var(--amber)', textTransform:'uppercase', margin:'24px 0 4px' }}>Tabacos</div>
+      <div style={{ fontSize:12, color:'var(--text2)', marginBottom:9 }}>Las entradas se registran por cajas; las ventas y existencias se controlan por cigarrillos individuales.</div>
+      <div className="inventory-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
+        {products.filter(product => product.inventory_section === 'tabacos').map(renderProduct)}
       </div>
 
       <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', margin:'22px 0 8px' }}>Últimos movimientos</div>
       <div style={{ background:'#fff', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
         {movements.length === 0 ? <div style={{ padding:20, textAlign:'center', color:'var(--text3)', fontSize:13 }}>Todavía no hay movimientos.</div> : movements.slice(0, 100).map(movement => (
           <div className="movement-row" key={movement.id} style={{ display:'grid', gridTemplateColumns:'1fr 110px 90px 150px', gap:10, padding:'9px 12px', borderBottom:'1px solid var(--border)', fontSize:12 }}>
-            <span>{movement.product_name}</span>
+            <span>{movement.product_name}{movement.note && <small style={{ display:'block', color:'var(--text3)', marginTop:2 }}>{movement.note}</small>}</span>
             <span style={{ color:movement.quantity > 0 ? 'var(--green)' : 'var(--coral)', fontWeight:600 }}>{movement.quantity > 0 ? '+' : ''}{movement.quantity}</span>
-            <span>{movement.type === 'entrada' ? 'Entrada' : 'Venta'}</span>
+            <span>{movement.type === 'entrada' ? 'Entrada' : movement.type === 'venta' ? 'Venta' : 'Ajuste'}</span>
             <span style={{ color:'var(--text3)' }}>{fmtDate(movement.date)}</span>
           </div>
         ))}

@@ -101,7 +101,7 @@ function CierreDetalle({ cierre, onClose }) {
                 display:'flex', justifyContent:'space-between', alignItems:'center',
               }}>
                 <div>
-                  <div style={{ fontSize:13, fontWeight:500 }}>Mesa {v.mesa_numero || v.mesa_id} · <span style={{ textTransform:'capitalize' }}>{v.payment_method || 'efectivo'}</span>{v.payment_reference ? ` · Comp. ${v.payment_reference}` : ''}</div>
+                  <div style={{ fontSize:13, fontWeight:500 }}>{v.source === 'cuenta' ? `Cuenta · Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`} · <span style={{ textTransform:'capitalize' }}>{v.payment_method || 'efectivo'}</span>{v.payment_reference ? ` · Comp. ${v.payment_reference}` : ''}</div>
                   <div style={{ fontSize:11, color:'var(--text3)' }}>
                     {v.hora} · {v.items?.map(it => it.name+(it.qty>1?' x'+it.qty:'')).join(', ')}
                   </div>

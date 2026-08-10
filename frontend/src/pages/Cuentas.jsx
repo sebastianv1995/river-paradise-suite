@@ -13,12 +13,15 @@ export default function Cuentas({ location }) {
   const [internalNote, setInternalNote] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [menu, setMenu] = useState({});
+  const [addingConsumption, setAddingConsumption] = useState(false);
+  const [cart, setCart] = useState({});
 
   async function load() {
-    const response = await fetch('/api/accounts');
+    const [response, menuResponse] = await Promise.all([fetch('/api/accounts'), fetch('/api/menu')]);
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'No se pudieron cargar las cuentas');
-    setAccounts(result);
+    if (!response.ok || !menuResponse.ok) throw new Error(result.error || 'No se pudieron cargar las cuentas');
+    setAccounts(result); setMenu(await menuResponse.json());
   }
   useEffect(() => { load().catch(error => setMessage(`Error: ${error.message}`)); }, []);
 
@@ -28,7 +31,31 @@ export default function Cuentas({ location }) {
 
   function open(account) {
     setSelectedId(account.id); setAmount(account.balance.toFixed(2)); setMessage('');
-    setReference(''); setInternalNote('');
+    setReference(''); setInternalNote(''); setAddingConsumption(false); setCart({});
+  }
+
+  function changeCart(item, delta) {
+    setCart(current => {
+      const next = Math.max(0, (current[item.id] || 0) + delta);
+      if (!next) { const copy = { ...current }; delete copy[item.id]; return copy; }
+      return { ...current, [item.id]:next };
+    });
+  }
+
+  async function saveConsumption() {
+    const items = Object.entries(cart).map(([item_id, qty]) => ({ item_id, qty }));
+    if (!items.length) return;
+    setSaving(true); setMessage('');
+    try {
+      const response = await fetch(`/api/accounts/${selected.id}/charges`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ items, location_id:location }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'No se pudo agregar el consumo');
+      setMessage('✓ Consumo agregado a la cuenta'); setCart({}); setAddingConsumption(false); await load();
+      setAmount(result.balance.toFixed(2));
+    } catch (error) { setMessage(`Error: ${error.message}`); }
+    finally { setSaving(false); }
   }
 
   async function registerPayment() {
@@ -66,7 +93,13 @@ export default function Cuentas({ location }) {
   return <div className="page-container accounts-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
     <div className="accounts-header"><div><div style={{ fontSize:18, fontWeight:600 }}>Cuentas pendientes</div><div style={{ fontSize:12, color:'var(--text2)' }}>Huéspedes, propietarios y personas autorizadas.</div></div><div className="pending-total"><span>Total pendiente</span><strong>{money(pendingTotal)}</strong></div></div>
     {message && <div className={`account-message ${message.startsWith('Error') ? 'error' : ''}`}>{message}</div>}
-    <div className="account-toolbar"><button className={!showClosed ? 'active' : ''} onClick={() => setShowClosed(false)}>Pendientes</button><button className={showClosed ? 'active' : ''} onClick={() => setShowClosed(true)}>Ver todas</button></div>
+    <div className="account-toolbar">
+      <button className={!showClosed ? 'active' : ''} onClick={() => setShowClosed(false)}>Pendientes</button>
+      <button className={showClosed ? 'active' : ''} onClick={() => setShowClosed(true)}>Ver todas</button>
+      <a href="/api/export/accounts-pending/all" style={{ marginLeft:'auto', padding:'7px 12px', borderRadius:8, background:'var(--green)', color:'#fff', textDecoration:'none', fontSize:12, fontWeight:600 }}>
+        Descargar todas las pendientes
+      </a>
+    </div>
 
     <div className="accounts-layout">
       <div className="account-list">
@@ -81,6 +114,33 @@ export default function Cuentas({ location }) {
         {!selected ? <div className="account-empty">Selecciona una cuenta para consultar consumos o registrar un pago.</div> : <>
           <div className="account-detail-title"><div><strong>{selected.name}</strong><small>{typeLabel[selected.type]}{selected.room ? ` · Habitación ${selected.room}` : ''}</small></div><strong>{money(selected.balance)}</strong></div>
           <div className="account-totals"><span>Cargado <b>{money(selected.charged)}</b></span><span>Pagado <b>{money(selected.paid)}</b></span><span>Interno <b>{money(selected.internal)}</b></span></div>
+          <div style={{ display:'flex', gap:8, margin:'10px 0' }}>
+            {selected.balance > 0 && <button className="pay-account" style={{ flex:1, width:'auto', marginTop:0 }} onClick={() => { setAddingConsumption(value => !value); setCart({}); }}>
+              {addingConsumption ? 'Cerrar carta' : '+ Agregar consumo'}
+            </button>}
+            <a href={`/api/export/accounts/${selected.id}`} style={{ flex:1, display:'grid', placeItems:'center', border:'1px solid var(--green)', borderRadius:8, color:'var(--green)', textDecoration:'none', fontSize:12, fontWeight:600 }}>
+              Descargar estado de cuenta
+            </a>
+          </div>
+          {addingConsumption && <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:10, maxHeight:330, overflowY:'auto', marginBottom:12 }}>
+            <div style={{ fontSize:12, color:'var(--text2)', marginBottom:8 }}>Selecciona los productos consumidos. Se cargarán a la habitación sin registrar un pago.</div>
+            {Object.entries(menu).map(([category, products]) => <div key={category} style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:'var(--amber)', textTransform:'uppercase', marginBottom:4 }}>{category}</div>
+              {products.map(item => <div key={item.id} style={{ display:'grid', gridTemplateColumns:'1fr auto auto', alignItems:'center', gap:8, padding:'5px 3px', borderBottom:'1px solid var(--border)' }}>
+                <span style={{ fontSize:12 }}>{item.name}<small style={{ display:'block', color:'var(--text3)' }}>{money(item.price)}</small></span>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <button disabled={!cart[item.id]} onClick={() => changeCart(item, -1)} style={smallButton}>−</button><b style={{ minWidth:18, textAlign:'center' }}>{cart[item.id] || 0}</b>
+                  <button disabled={item.price <= 0} title={item.price <= 0 ? 'Configura el precio en Carta' : ''} onClick={() => changeCart(item, 1)} style={smallButton}>+</button>
+                </div>
+                <strong style={{ minWidth:55, textAlign:'right', fontSize:12 }}>{money((cart[item.id] || 0) * item.price)}</strong>
+              </div>)}
+            </div>)}
+            <div style={{ position:'sticky', bottom:0, background:'#fff', paddingTop:8 }}>
+              <button className="pay-account" disabled={saving || !Object.keys(cart).length} onClick={saveConsumption}>
+                Confirmar consumo · {money(Object.entries(cart).reduce((sum, [id, qty]) => sum + (Object.values(menu).flat().find(item => item.id === id)?.price || 0) * qty, 0))}
+              </button>
+            </div>
+          </div>}
           {selected.balance > 0 && <div className="account-actions">
             <label><span>Valor a resolver</span><input type="number" min="0.01" max={selected.balance} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></label>
             <div className="account-payment-methods">{['efectivo','tarjeta','transferencia'].map(value => <button key={value} className={method === value ? 'active' : ''} onClick={() => setMethod(value)}>{value}</button>)}</div>
@@ -91,10 +151,14 @@ export default function Cuentas({ location }) {
             <button className="internal-account" disabled={saving || !Number(amount) || !internalNote.trim()} onClick={convertInternal}>Convertir en consumo interno</button>
           </div>}
           <h3>Consumos</h3>
-          {[...(selected.charges || [])].reverse().map(charge => <div className="account-history-row" key={charge.id}><span><b>{charge.fecha}</b><small>{charge.hora}{charge.note ? ` · ${charge.note}` : ''}</small></span><strong>{money(charge.amount)}</strong></div>)}
+          {[...(selected.charges || [])].reverse().map(charge => <div className="account-history-row" key={charge.id}><span><b>{charge.fecha}</b><small>{charge.hora}{charge.location_id ? ` · ${charge.location_id}` : ''}{charge.note ? ` · ${charge.note}` : ''}</small>
+            {!!charge.items?.length && <small style={{ color:'var(--text2)', marginTop:3 }}>{charge.items.map(item => `${item.qty} ${item.name}`).join(', ')}</small>}
+          </span><strong>{money(charge.amount)}</strong></div>)}
           {!!selected.payments?.length && <><h3>Pagos</h3>{[...selected.payments].reverse().map(payment => <div className="account-history-row payment" key={payment.id}><span><b style={{ textTransform:'capitalize' }}>{payment.payment_method}</b><small>{payment.fecha} · {payment.hora}{payment.payment_reference ? ` · Comp. ${payment.payment_reference}` : ''}</small></span><strong>−{money(payment.amount)}</strong></div>)}</>}
         </>}
       </div>
     </div>
   </div>;
 }
+
+const smallButton = { width:24, height:24, border:'1px solid var(--border)', borderRadius:6, background:'#fff', cursor:'pointer' };

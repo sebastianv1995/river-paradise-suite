@@ -3,12 +3,14 @@ const cors    = require('cors');
 const ExcelJS = require('exceljs');
 const fs      = require('fs');
 const path    = require('path');
+const crypto  = require('crypto');
 
 const app     = express();
 const PORT    = Number(process.env.PORT) || 3001;
 const DB_FILE = process.env.DB_FILE ? path.resolve(process.env.DB_FILE) : path.join(__dirname, 'river_paradise.json');
 const MENU_FILE = path.join(__dirname, '..', 'menu.json');
 const LOCATIONS = ['restaurante', 'cafeteria'];
+const EXCEL_PROTECTION_PASSWORD = process.env.EXCEL_PROTECTION_PASSWORD || crypto.randomBytes(24).toString('hex');
 
 // ── Base de datos JSON ────────────────────────────────────────
 function loadDB() {
@@ -56,6 +58,8 @@ function loadDB() {
   for (const closing of db.cierres) closing.location_id ||= 'restaurante';
   for (const movement of db.movimientos_caja) movement.location_id ||= 'restaurante';
   for (const account of db.cuentas) {
+    account.stay_id ||= `stay-${account.id}`;
+    if (account.reservation_id === undefined) account.reservation_id = null;
     for (const charge of account.charges || []) charge.location_id ||= 'restaurante';
     for (const payment of account.payments || []) payment.location_id ||= 'restaurante';
     for (const writeoff of account.writeoffs || []) writeoff.location_id ||= 'restaurante';
@@ -106,21 +110,112 @@ function stockFor(db, itemId) {
     .reduce((total, movement) => total + movement.quantity, 0);
 }
 
-function accountSummary(account) {
+function accountSummary(account, ventas = []) {
   const charged = fmt((account.charges || []).reduce((sum, item) => sum + item.amount, 0));
   const paid = fmt((account.payments || []).reduce((sum, item) => sum + item.amount, 0));
   const internal = fmt((account.writeoffs || []).reduce((sum, item) => sum + item.amount, 0));
-  return { ...account, charged, paid, internal, balance:fmt(charged - paid - internal) };
+  const salesById = Object.fromEntries(ventas.map(sale => [sale.id, sale]));
+  const charges = (account.charges || []).map(charge => ({
+    ...charge, items:charge.items || salesById[charge.sale_id]?.items || [],
+  }));
+  return { ...account, charges, charged, paid, internal, balance:fmt(charged - paid - internal) };
 }
 
 function validLocation(value) {
   return LOCATIONS.includes(value) ? value : null;
 }
 
+async function polishWorkbook(workbook, summarySheets = []) {
+  workbook.creator = 'River Paradise';
+  workbook.company = 'River Paradise';
+  workbook.subject = 'Reporte administrativo';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  workbook.calcProperties.fullCalcOnLoad = true;
+  const summaries = new Set(summarySheets);
+  for (const sheet of workbook.worksheets) {
+    const isSummary = summaries.has(sheet.name);
+    const lastColumn = Math.max(1, sheet.columnCount);
+    const lastColumnLetter = sheet.getColumn(lastColumn).letter;
+    sheet.properties.defaultRowHeight = 18;
+    sheet.pageSetup = {
+      orientation:lastColumn > 5 ? 'landscape' : 'portrait', paperSize:9,
+      fitToPage:true, fitToWidth:1, fitToHeight:0,
+      margins:{ left:0.3, right:0.3, top:0.55, bottom:0.55, header:0.2, footer:0.2 },
+    };
+    sheet.headerFooter.oddFooter = '&LRiver Paradise&CConfidencial&R Página &P de &N';
+    sheet.getRow(1).height = isSummary ? 28 : 24;
+    sheet.getRow(1).alignment = { vertical:'middle', horizontal:isSummary ? 'left' : 'center' };
+    sheet.getRow(1).font = { bold:true, size:isSummary ? 14 : 11, color:{ argb:'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF235347' } };
+    if (!isSummary && sheet.rowCount >= 1) {
+      sheet.views = [{ state:'frozen', ySplit:1, showGridLines:false }];
+      sheet.autoFilter = `A1:${lastColumnLetter}${Math.max(1, sheet.rowCount)}`;
+    } else {
+      sheet.views = [{ showGridLines:false }];
+    }
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell({ includeEmpty:true }, cell => {
+        cell.alignment = { ...cell.alignment, vertical:'middle', wrapText:true };
+        if (rowNumber > 1 && !isSummary && rowNumber % 2 === 0) {
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF5F7F6' } };
+        }
+        if (rowNumber > 1) cell.border = { bottom:{ style:'hair', color:{ argb:'FFD9E1DE' } } };
+      });
+    });
+    if (isSummary) {
+      sheet.getColumn(1).font = { bold:true, color:{ argb:'FF29453D' } };
+      sheet.getColumn(2).alignment = { horizontal:'right', vertical:'middle' };
+    }
+    await sheet.protect(EXCEL_PROTECTION_PASSWORD, {
+      spinCount:10000,
+      selectLockedCells:true,
+      selectUnlockedCells:true,
+      autoFilter:true,
+      sort:true,
+      formatCells:false,
+      formatColumns:false,
+      formatRows:false,
+      insertRows:false,
+      insertColumns:false,
+      deleteRows:false,
+      deleteColumns:false,
+    });
+  }
+}
+
 // ── CARTA ─────────────────────────────────────────────────────
 
 app.get('/api/menu', (req, res) => {
   res.json(loadMenu());
+});
+
+app.post('/api/menu', (req, res) => {
+  const menu = loadMenu();
+  const category = String(req.body.category ?? '').trim();
+  const name = String(req.body.name ?? '').trim();
+  const desc = String(req.body.desc ?? '').trim();
+  const price = Number(req.body.price);
+  const trackStock = req.body.track_stock === true;
+  const stockMin = Number(req.body.stock_min ?? 0);
+
+  if (!category || category.length > 80) return res.status(400).json({ error:'Escribe una categoría válida' });
+  if (!name || name.length > 100) return res.status(400).json({ error:'Escribe un nombre válido' });
+  if (desc.length > 300) return res.status(400).json({ error:'La descripción es demasiado larga' });
+  if (!Number.isFinite(price) || price < 0 || price > 9999.99) return res.status(400).json({ error:'El precio debe estar entre 0 y 9999.99' });
+  if (trackStock && (!Number.isInteger(stockMin) || stockMin < 0 || stockMin > 100000)) {
+    return res.status(400).json({ error:'El stock mínimo debe ser un entero mayor o igual a cero' });
+  }
+
+  const ids = new Set(Object.values(menu).flat().map(item => item.id));
+  let id;
+  do id = `prod_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`; while (ids.has(id));
+  const product = { id, name, desc, price:fmt(price) };
+  if (trackStock) Object.assign(product, { track_stock:true, stock_min:stockMin });
+  menu[category] ||= [];
+  menu[category].push(product);
+  saveMenu(menu);
+  res.status(201).json({ product, menu });
 });
 
 app.put('/api/menu/:itemId', (req, res) => {
@@ -147,6 +242,17 @@ app.put('/api/menu/:itemId', (req, res) => {
   product.name = name;
   product.desc = desc;
   product.price = fmt(price);
+  if (req.body.track_stock === true) {
+    const stockMin = Number(req.body.stock_min ?? 0);
+    if (!Number.isInteger(stockMin) || stockMin < 0 || stockMin > 100000) {
+      return res.status(400).json({ error:'El stock mínimo debe ser un entero mayor o igual a cero' });
+    }
+    product.track_stock = true;
+    product.stock_min = stockMin;
+  } else {
+    delete product.track_stock;
+    delete product.stock_min;
+  }
   saveMenu(menu);
   res.json(product);
 });
@@ -178,15 +284,39 @@ app.get('/api/inventory/movements', (req, res) => {
 app.post('/api/inventory/:itemId/entries', (req, res) => {
   const db = loadDB();
   const product = Object.values(loadMenu()).flat().find(item => item.id === req.params.itemId && item.track_stock);
-  const quantity = Number(req.body.quantity);
+  const enteredQuantity = Number(req.body.quantity);
   if (!product) return res.status(404).json({ error: 'Producto de inventario no encontrado' });
-  if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 100000) {
+  if (!Number.isInteger(enteredQuantity) || enteredQuantity <= 0 || enteredQuantity > 100000) {
     return res.status(400).json({ error: 'La cantidad debe ser un número entero mayor a cero' });
   }
+  const packageSize = Number.isInteger(product.package_size) && product.package_size > 1 ? product.package_size : 1;
+  const quantity = enteredQuantity * packageSize;
   db.movimientos_stock.push({
     id: db._nextStockMovementId++, item_id: product.id, type: 'entrada', quantity,
-    note: String(req.body.note || '').trim().slice(0, 200),
+    note: packageSize > 1 ? `${enteredQuantity} caja(s) de ${packageSize} unidades` : '',
     date: new Date().toISOString(),
+  });
+  saveDB(db);
+  res.json({ ok:true, stock:stockFor(db, product.id), units_added:quantity });
+});
+
+app.post('/api/inventory/:itemId/adjustments', (req, res) => {
+  const db = loadDB();
+  const product = Object.values(loadMenu()).flat().find(item => item.id === req.params.itemId && item.track_stock);
+  const quantity = Number(req.body.quantity);
+  const note = String(req.body.note || '').trim();
+  if (!product) return res.status(404).json({ error:'Producto de inventario no encontrado' });
+  if (!Number.isInteger(quantity) || quantity === 0 || Math.abs(quantity) > 100000) {
+    return res.status(400).json({ error:'El ajuste debe ser un entero distinto de cero' });
+  }
+  if (!note || note.length > 200) return res.status(400).json({ error:'Escribe el motivo del ajuste' });
+  const currentStock = stockFor(db, product.id);
+  if (currentStock + quantity < 0) {
+    return res.status(409).json({ error:`El ajuste dejaría el stock en negativo. Actualmente hay ${currentStock} unidades.` });
+  }
+  db.movimientos_stock.push({
+    id:db._nextStockMovementId++, item_id:product.id, type:'ajuste', quantity,
+    note, date:new Date().toISOString(),
   });
   saveDB(db);
   res.json({ ok:true, stock:stockFor(db, product.id) });
@@ -228,7 +358,55 @@ app.post('/api/cash-movements', (req, res) => {
 
 app.get('/api/accounts', (req, res) => {
   const db = loadDB();
-  res.json(db.cuentas.map(accountSummary).sort((a, b) => b.id - a.id));
+  res.json(db.cuentas.map(account => accountSummary(account, db.ventas)).sort((a, b) => b.id - a.id));
+});
+
+app.post('/api/accounts/:id/charges', (req, res) => {
+  const db = loadDB();
+  const account = db.cuentas.find(item => item.id === Number(req.params.id));
+  if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
+  const location = validLocation(req.body.location_id);
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  const requestedItems = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!requestedItems.length) return res.status(400).json({ error:'Agrega al menos un producto' });
+  const catalog = Object.values(loadMenu()).flat();
+  const productsById = Object.fromEntries(catalog.map(item => [item.id, item]));
+  const items = [];
+  for (const requested of requestedItems) {
+    const product = productsById[String(requested.item_id || '')];
+    const qty = Number(requested.qty);
+    if (!product || !Number.isInteger(qty) || qty <= 0 || qty > 999) return res.status(400).json({ error:'Hay un producto o cantidad no válida' });
+    if (product.price <= 0) return res.status(409).json({ error:`Configura primero el precio de ${product.name} en Carta` });
+    items.push({ id:Date.now() + items.length, item_id:product.id, name:product.name, price:product.price, qty });
+  }
+  const tracked = Object.fromEntries(catalog.filter(item => item.track_stock).map(item => [item.id, item]));
+  const stockRequirements = {};
+  for (const item of items) {
+    const product = productsById[item.item_id];
+    if (product.stock_components?.length) {
+      for (const component of product.stock_components) stockRequirements[component.item_id] = (stockRequirements[component.item_id] || 0) + component.quantity * item.qty;
+    } else if (tracked[item.item_id]) stockRequirements[item.item_id] = (stockRequirements[item.item_id] || 0) + item.qty;
+  }
+  for (const [itemId, required] of Object.entries(stockRequirements)) {
+    const available = stockFor(db, itemId);
+    if (!tracked[itemId] || available < required) return res.status(409).json({ error:`Stock insuficiente de ${tracked[itemId]?.name || itemId}. Necesario: ${required}. Disponible: ${available}` });
+  }
+  const total = fmt(items.reduce((sum, item) => sum + item.price * item.qty, 0));
+  const saleId = db._nextVentaId++;
+  const sale = { id:saleId, mesa_id:null, mesa_numero:null, location_id:location, source:'cuenta', items,
+    payment_method:'cuenta', payment_reference:'', account_id:account.id, account_name:account.name,
+    account_room:account.room || '', collection_status:'pendiente',
+    total, hora:nowTime(), fecha:todayStr() };
+  db.ventas.push(sale);
+  account.charges ||= [];
+  account.charges.push({ id:db._nextAccountChargeId++, sale_id:saleId, amount:total, items,
+    fecha:sale.fecha, hora:sale.hora, location_id:location, note:'Consumo agregado desde cuenta' });
+  for (const [itemId, quantity] of Object.entries(stockRequirements)) db.movimientos_stock.push({
+    id:db._nextStockMovementId++, item_id:itemId, type:'venta', quantity:-quantity,
+    venta_id:saleId, location_id:location, date:new Date().toISOString(), note:`Cuenta ${account.name} · Hab. ${account.room || '-'}`,
+  });
+  saveDB(db);
+  res.status(201).json(accountSummary(account, db.ventas));
 });
 
 app.post('/api/accounts/:id/payments', (req, res) => {
@@ -359,6 +537,7 @@ app.post('/api/mesas/:id/cancelar-cobro', (req, res) => {
 app.post('/api/mesas/:id/cerrar', (req, res) => {
   const db   = loadDB();
   const mesa = requireMesa(db, req.params.id, res);
+  let createdSale = null;
   if (!mesa) return;
   if (mesa.status === 'libre') return res.status(409).json({ error: 'La mesa ya está cerrada' });
   if (req.body.cobrado && mesa.status !== 'pagando') return res.status(409).json({ error: 'Primero debe marcar la mesa para cobrar' });
@@ -369,6 +548,13 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
     }
     const paymentReference = ['tarjeta','transferencia'].includes(paymentMethod) ? String(req.body.payment_reference || '').trim() : '';
     if (paymentReference.length > 80) return res.status(400).json({ error: 'El número de comprobante es demasiado largo' });
+    const invoiceRequested = req.body.invoice_requested === true;
+    const customerName = invoiceRequested ? String(req.body.customer_name || '').trim() : '';
+    const customerTaxId = invoiceRequested ? String(req.body.customer_tax_id || '').replace(/\s+/g, '') : '';
+    const customerCity = invoiceRequested ? String(req.body.customer_city || '').trim() : '';
+    if (invoiceRequested && (!customerName || customerName.length > 150)) return res.status(400).json({ error:'Escribe el nombre o razón social del cliente' });
+    if (invoiceRequested && !/^(\d{10}|\d{13})$/.test(customerTaxId)) return res.status(400).json({ error:'La cédula debe tener 10 dígitos o el RUC 13 dígitos' });
+    if (invoiceRequested && (!customerCity || customerCity.length > 100)) return res.status(400).json({ error:'Escribe la ciudad del cliente' });
     let account = null;
     if (paymentMethod === 'cuenta') {
       const accountType = String(req.body.account_type || '');
@@ -377,12 +563,13 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
       if (!['habitacion','propietario','otro'].includes(accountType)) return res.status(400).json({ error:'Selecciona el tipo de cuenta' });
       if (!accountName || accountName.length > 100) return res.status(400).json({ error:'Escribe el nombre del huésped o responsable' });
       if (accountType === 'habitacion' && (!room || room.length > 20)) return res.status(400).json({ error:'Escribe el número de habitación' });
-      account = db.cuentas.map(accountSummary).filter(item => item.type === accountType &&
-        item.name.toLowerCase() === accountName.toLowerCase() && (item.room || '') === room)
+      account = db.cuentas.map(item => accountSummary(item)).filter(item => item.type === accountType &&
+        item.balance > 0 && item.name.toLowerCase() === accountName.toLowerCase() && (item.room || '') === room)
         .sort((a, b) => b.id - a.id)[0];
       if (!account) {
-        account = { id:db._nextAccountId++, type:accountType, name:accountName, room,
-          created_at:new Date().toISOString(), charges:[], payments:[], writeoffs:[] };
+        const accountId = db._nextAccountId++;
+        account = { id:accountId, stay_id:`stay-${accountId}-${Date.now().toString(36)}`, reservation_id:null,
+          type:accountType, name:accountName, room, created_at:new Date().toISOString(), charges:[], payments:[], writeoffs:[] };
         db.cuentas.push(account);
       } else {
         account = db.cuentas.find(item => item.id === account.id);
@@ -411,7 +598,7 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
     }
     const total = fmt(mesaTotal(mesa));
     const ventaId = db._nextVentaId++;
-    db.ventas.push({
+    createdSale = {
       id:      ventaId,
       mesa_id: mesa.id,
       mesa_numero: mesa.number,
@@ -419,14 +606,19 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
       items:   [...mesa.items],
       payment_method: paymentMethod,
       payment_reference: paymentReference,
+      invoice_requested: invoiceRequested,
+      customer_name: customerName,
+      customer_tax_id: customerTaxId,
+      customer_city: customerCity,
       account_id: account?.id || null,
       collection_status: paymentMethod === 'cuenta' ? 'pendiente' : 'pagada',
       total,
       hora:  nowTime(),
       fecha: todayStr(),
-    });
+    };
+    db.ventas.push(createdSale);
     if (account) account.charges.push({ id:db._nextAccountChargeId++, sale_id:ventaId,
-      amount:total, fecha:todayStr(), hora:nowTime(), location_id:mesa.location_id, note:String(req.body.account_note || '').trim().slice(0,150) });
+      amount:total, items:[...mesa.items], fecha:todayStr(), hora:nowTime(), location_id:mesa.location_id, note:String(req.body.account_note || '').trim().slice(0,150) });
     for (const [itemId, quantity] of Object.entries(stockRequirements)) {
       db.movimientos_stock.push({
         id: db._nextStockMovementId++, item_id:itemId, type:'venta',
@@ -438,7 +630,7 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
   mesa.openedAt = null;
   mesa.items    = [];
   saveDB(db);
-  res.json({ ok: true });
+  res.json({ ok:true, sale:createdSale });
 });
 
 // ── VENTAS ────────────────────────────────────────────────────
@@ -580,7 +772,7 @@ app.get('/api/export/report', async (req, res) => {
     { header:'Nº comprobante', key:'reference', width:20 }, { header:'Ítems', key:'items', width:45 },
     { header:'Total', key:'total', width:13 },
   ]; header(detail.getRow(1));
-  report.ventas.forEach(v => detail.addRow({ id:v.id, location:v.location_id, fecha:v.fecha, hora:v.hora, mesa:`Mesa ${v.mesa_numero || v.mesa_id}`,
+  report.ventas.forEach(v => detail.addRow({ id:v.id, location:v.location_id, fecha:v.fecha, hora:v.hora, mesa:v.source === 'cuenta' ? `Cuenta Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`,
     payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
     items:(v.items || []).map(i => `${i.name}${i.qty > 1 ? ` x${i.qty}` : ''}`).join(', '),
     total:v.total }));
@@ -602,6 +794,7 @@ app.get('/api/export/report', async (req, res) => {
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="reporte_${report.location}_${range.from}_${range.to}.xlsx"`);
+  await polishWorkbook(wb, ['Resumen general']);
   await wb.xlsx.write(res);
   res.end();
 });
@@ -727,10 +920,11 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws2.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
   ws2.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   cierre.ventas.forEach((v, i) => ws2.addRow({
-    num: i+1, mesa: `Mesa ${v.mesa_numero || v.mesa_id}`, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
+    num: i+1, mesa:v.source === 'cuenta' ? `Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
     items:    v.items.map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
-    total:    `$${v.total.toFixed(2)}`,
+    total:    v.total,
   }));
+  ws2.getColumn('total').numFmt = '$#,##0.00';
 
   // Hoja 3 — Top productos
   const ws3 = wb.addWorksheet('Top productos');
@@ -749,7 +943,8 @@ app.get('/api/export/cierre/:id', async (req, res) => {
       topMap[it.name].rev += it.price * it.qty;
     }
   Object.values(topMap).sort((a,b) => b.rev - a.rev)
-    .forEach(it => ws3.addRow({ name:it.name, qty:it.qty, rev:`$${it.rev.toFixed(2)}` }));
+    .forEach(it => ws3.addRow({ name:it.name, qty:it.qty, rev:it.rev }));
+  ws3.getColumn('rev').numFmt = '$#,##0.00';
 
   const ws4 = wb.addWorksheet('Caja chica');
   ws4.columns = [
@@ -762,8 +957,9 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws4.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   for (const movement of cierre.movimientos_caja || []) ws4.addRow({
     hora:movement.hora, type:movement.type, concept:movement.concept,
-    amount:`$${movement.amount.toFixed(2)}`,
+    amount:movement.amount,
   });
+  ws4.getColumn('amount').numFmt = '$#,##0.00';
 
   const ws5 = wb.addWorksheet('Cobros de cuentas');
   ws5.columns = [
@@ -773,10 +969,12 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ];
   ws5.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
   ws5.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
-  for (const payment of cierre.pagos_cuentas || []) ws5.addRow({ ...payment, amount:`$${payment.amount.toFixed(2)}` });
+  for (const payment of cierre.pagos_cuentas || []) ws5.addRow({ ...payment, amount:payment.amount });
+  ws5.getColumn('amount').numFmt = '$#,##0.00';
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="cierre_${cierre.fecha.replace(/\//g,'-')}_${cierre.hora.replace(':','-')}.xlsx"`);
+  await polishWorkbook(wb, ['Resumen']);
   await wb.xlsx.write(res);
   res.end();
 });
@@ -802,15 +1000,138 @@ app.get('/api/export/ventas', async (req, res) => {
   ws.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
   ws.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   ventas.forEach((v, i) => ws.addRow({
-    num: i+1, mesa: `Mesa ${v.mesa_numero || v.mesa_id}`, fecha: v.fecha, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
+    num: i+1, mesa:v.source === 'cuenta' ? `Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`, fecha: v.fecha, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
     items:    v.items.map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
-    total:    `$${v.total.toFixed(2)}`,
+    total:    v.total,
   }));
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="ventas_${location || 'general'}_${fecha.replace(/\//g,'-')}.xlsx"`);
+  ws.getColumn('total').numFmt = '$#,##0.00';
+  await polishWorkbook(wb);
   await wb.xlsx.write(res);
   res.end();
+});
+
+app.get('/api/export/solicitudes-factura', async (req, res) => {
+  const db = loadDB();
+  const fecha = req.query.fecha || todayStr();
+  const location = validLocation(req.query.location);
+  const requests = db.ventas.filter(sale => sale.fecha === fecha && sale.invoice_requested && (!location || sale.location_id === location));
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Solicitudes de factura');
+  ws.columns = [
+    { header:'Venta', key:'id', width:10 }, { header:'Nombre / Razón social', key:'name', width:35 },
+    { header:'RUC / Cédula', key:'tax_id', width:18 }, { header:'Fecha', key:'date', width:14 },
+    { header:'Ciudad', key:'city', width:22 }, { header:'Valor de consumo', key:'total', width:18 },
+    { header:'Local', key:'location', width:16 }, { header:'Mesa', key:'table', width:10 },
+  ];
+  ws.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
+  ws.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
+  for (const sale of requests) ws.addRow({ id:sale.id, name:sale.customer_name, tax_id:sale.customer_tax_id,
+    date:sale.fecha, city:sale.customer_city, total:sale.total, location:sale.location_id, table:sale.mesa_numero || sale.mesa_id });
+  ws.getColumn('total').numFmt = '$0.00';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="solicitudes_factura_${location || 'general'}_${fecha.replace(/\//g,'-')}.xlsx"`);
+  await polishWorkbook(wb);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+app.get('/api/export/accounts/:id', async (req, res) => {
+  const db = loadDB();
+  const raw = db.cuentas.find(item => item.id === Number(req.params.id));
+  if (!raw) return res.status(404).json({ error:'Cuenta no encontrada' });
+  const account = accountSummary(raw, db.ventas);
+  const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Estado de cuenta');
+  summary.columns = [{ key:'label', width:28 }, { key:'value', width:34 }];
+  summary.addRow(['ESTADO DE CUENTA — RIVER PARADISE', '']); summary.mergeCells('A1:B1');
+  summary.addRow([]); summary.addRow(['Huésped / responsable', account.name]);
+  summary.addRow(['Habitación', account.room || 'No aplica']);
+  summary.addRow(['Identificador de estadía', account.stay_id]);
+  summary.addRow(['Identificador de reserva', account.reservation_id || 'Pendiente de integración']);
+  summary.addRow(['Cuenta creada', account.created_at ? new Date(account.created_at).toLocaleString('es-EC') : '']);
+  summary.addRow([]); summary.addRow(['Total consumos', account.charged]);
+  summary.addRow(['Total pagado', account.paid]); summary.addRow(['Consumo interno', account.internal]);
+  summary.addRow(['SALDO PENDIENTE', account.balance]);
+  ['B9','B10','B11','B12'].forEach(cell => { summary.getCell(cell).numFmt = '$#,##0.00'; });
+
+  const charges = wb.addWorksheet('Detalle de consumos');
+  charges.columns = [
+    { header:'Fecha', key:'date', width:14 }, { header:'Hora', key:'time', width:12 },
+    { header:'Local', key:'location', width:16 }, { header:'Venta', key:'sale', width:10 },
+    { header:'Cantidad', key:'qty', width:12 }, { header:'Producto', key:'product', width:34 },
+    { header:'Precio unitario', key:'price', width:17 }, { header:'Subtotal', key:'subtotal', width:16 },
+  ];
+  for (const charge of account.charges) {
+    if (charge.items?.length) for (const item of charge.items) charges.addRow({ date:charge.fecha, time:charge.hora,
+      location:charge.location_id, sale:charge.sale_id, qty:item.qty, product:item.name, price:item.price, subtotal:fmt(item.price * item.qty) });
+    else charges.addRow({ date:charge.fecha, time:charge.hora, location:charge.location_id, sale:charge.sale_id,
+      qty:'', product:charge.note || 'Consumo sin detalle', price:'', subtotal:charge.amount });
+  }
+  charges.getColumn('price').numFmt = '$#,##0.00'; charges.getColumn('subtotal').numFmt = '$#,##0.00';
+
+  const payments = wb.addWorksheet('Pagos');
+  payments.columns = [
+    { header:'Fecha', key:'fecha', width:14 }, { header:'Hora', key:'hora', width:12 },
+    { header:'Forma de pago', key:'payment_method', width:20 }, { header:'Comprobante', key:'payment_reference', width:22 },
+    { header:'Local', key:'location_id', width:16 }, { header:'Valor', key:'amount', width:16 },
+  ];
+  for (const payment of account.payments || []) payments.addRow(payment);
+  payments.getColumn('amount').numFmt = '$#,##0.00';
+  await polishWorkbook(wb, ['Estado de cuenta']);
+  const safeName = account.name.replace(/[^a-zA-Z0-9À-ſ]+/g, '_').slice(0, 40);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="estado_cuenta_${safeName}_hab_${account.room || 'NA'}.xlsx"`);
+  await wb.xlsx.write(res); res.end();
+});
+
+app.get('/api/export/accounts-pending/all', async (req, res) => {
+  const db = loadDB();
+  const accounts = db.cuentas.map(account => accountSummary(account, db.ventas))
+    .filter(account => account.balance > 0).sort((a, b) => String(a.room || '').localeCompare(String(b.room || ''), 'es', { numeric:true }));
+  const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Cuentas pendientes');
+  summary.columns = [
+    { header:'Habitación', key:'room', width:14 }, { header:'Huésped / responsable', key:'name', width:34 },
+    { header:'Tipo', key:'type', width:18 }, { header:'Estadía', key:'stay', width:28 },
+    { header:'Reserva', key:'reservation', width:20 }, { header:'Total consumos', key:'charged', width:18 },
+    { header:'Pagado', key:'paid', width:15 }, { header:'Consumo interno', key:'internal', width:18 },
+    { header:'Saldo pendiente', key:'balance', width:18 },
+  ];
+  for (const account of accounts) summary.addRow({ room:account.room || 'No aplica', name:account.name,
+    type:account.type, stay:account.stay_id, reservation:account.reservation_id || '', charged:account.charged,
+    paid:account.paid, internal:account.internal, balance:account.balance });
+  ['charged','paid','internal','balance'].forEach(key => { summary.getColumn(key).numFmt = '$#,##0.00'; });
+  if (accounts.length) {
+    const totalRow = summary.addRow({ name:'TOTAL GENERAL', charged:accounts.reduce((sum, item) => sum + item.charged, 0),
+      paid:accounts.reduce((sum, item) => sum + item.paid, 0), internal:accounts.reduce((sum, item) => sum + item.internal, 0),
+      balance:accounts.reduce((sum, item) => sum + item.balance, 0) });
+    totalRow.font = { bold:true, color:{ argb:'FF235347' } };
+    totalRow.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFE7F2EE' } };
+  }
+
+  const detail = wb.addWorksheet('Detalle de consumos');
+  detail.columns = [
+    { header:'Habitación', key:'room', width:14 }, { header:'Huésped', key:'guest', width:30 },
+    { header:'Fecha', key:'date', width:14 }, { header:'Hora', key:'time', width:12 },
+    { header:'Local', key:'location', width:16 }, { header:'Venta', key:'sale', width:10 },
+    { header:'Cantidad', key:'qty', width:12 }, { header:'Producto', key:'product', width:34 },
+    { header:'Precio unitario', key:'price', width:17 }, { header:'Subtotal', key:'subtotal', width:16 },
+  ];
+  for (const account of accounts) for (const charge of account.charges || []) {
+    if (charge.items?.length) for (const item of charge.items) detail.addRow({ room:account.room || 'No aplica', guest:account.name,
+      date:charge.fecha, time:charge.hora, location:charge.location_id, sale:charge.sale_id, qty:item.qty,
+      product:item.name, price:item.price, subtotal:fmt(item.price * item.qty) });
+    else detail.addRow({ room:account.room || 'No aplica', guest:account.name, date:charge.fecha, time:charge.hora,
+      location:charge.location_id, sale:charge.sale_id, product:charge.note || 'Consumo sin detalle', subtotal:charge.amount });
+  }
+  detail.getColumn('price').numFmt = '$#,##0.00'; detail.getColumn('subtotal').numFmt = '$#,##0.00';
+  await polishWorkbook(wb);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="cuentas_pendientes_${todayStr().replace(/\//g, '-')}.xlsx"`);
+  await wb.xlsx.write(res); res.end();
 });
 
 // ── Arrancar ──────────────────────────────────────────────────

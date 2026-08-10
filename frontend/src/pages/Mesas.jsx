@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { printKitchenTicket, printSaleReceipt } from '../utils/printTicket.js';
 
 const fmt = n => '$' + Number(n).toFixed(2);
 const api = async (url, opts) => {
@@ -58,7 +59,26 @@ function TableCard({ mesa, selected, onClick }) {
 }
 
 // ── Menu panel ─────────────────────────────────────────────────
-function MenuPanel({ mesaNumber, menu, onAdd, onBack }) {
+function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
+  const [addingId, setAddingId] = useState(null);
+  const [lastAdded, setLastAdded] = useState('');
+  const itemCount = orderItems.reduce((sum, item) => sum + item.qty, 0);
+  const quantities = Object.fromEntries(orderItems.map(item => [item.item_id, item.qty]));
+
+  async function handleAdd(item) {
+    if (addingId) return;
+    setAddingId(item.id);
+    try {
+      await onAdd(item);
+      setLastAdded(item.name);
+      window.setTimeout(() => setLastAdded(current => current === item.name ? '' : current), 1800);
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      setAddingId(null);
+    }
+  }
+
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       <div style={{
@@ -74,7 +94,10 @@ function MenuPanel({ mesaNumber, menu, onAdd, onBack }) {
           background:'transparent', fontSize:16, color:'var(--text2)',
         }}>✕</button>
       </div>
-      <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
+      {lastAdded && <div className="menu-added-feedback" role="status">
+        <span>✓</span><div><strong>{lastAdded}</strong><small>Agregado al pedido</small></div>
+      </div>}
+      <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'12px 16px' }}>
         {Object.entries(menu).map(([sec, items]) => (
           <div key={sec}>
             <div style={{
@@ -83,10 +106,13 @@ function MenuPanel({ mesaNumber, menu, onAdd, onBack }) {
               margin:'14px 0 8px', paddingBottom:4,
               borderBottom:`1px solid var(--border)`,
             }}>{sec}</div>
-            {items.map(item => (
-              <div key={item.id} onClick={() => onAdd(item)} style={{
+            {items.map(item => {
+              const quantity = quantities[item.id] || 0;
+              const isAdding = addingId === item.id;
+              return <button type="button" key={item.id} disabled={Boolean(addingId)} onClick={() => handleAdd(item)} className={`menu-product ${isAdding ? 'is-adding' : ''} ${quantity ? 'in-order' : ''}`} style={{
                 display:'flex', alignItems:'center', padding:'8px 10px',
-                borderRadius:8, cursor:'pointer', gap:10,
+                width:'100%', textAlign:'left', background:'transparent', fontFamily:'inherit',
+                borderRadius:8, cursor:addingId ? 'wait' : 'pointer', gap:10,
                 border:`1px solid transparent`,
                 transition:'all 0.1s',
               }}
@@ -97,18 +123,22 @@ function MenuPanel({ mesaNumber, menu, onAdd, onBack }) {
                   <div style={{ fontSize:13 }}>{item.name}</div>
                   {item.desc && <div style={{ fontSize:11, color:'var(--text3)', marginTop:1 }}>{item.desc}</div>}
                 </div>
+                {quantity > 0 && <span className="menu-quantity">{quantity} en pedido</span>}
                 <div style={{ fontSize:13, fontWeight:500, color:'var(--amber)' }}>{fmt(item.price)}</div>
-              </div>
-            ))}
+              </button>;
+            })}
           </div>
         ))}
       </div>
+      <button type="button" onClick={onBack} className="menu-order-summary">
+        <span>Ver pedido</span><strong>{itemCount} producto{itemCount === 1 ? '' : 's'} · {fmt(orderItems.reduce((sum, item) => sum + item.price * item.qty, 0))}</strong>
+      </button>
     </div>
   );
 }
 
 // ── Order panel ────────────────────────────────────────────────
-function OrderPanel({ mesa, menu, onClose, onRefresh }) {
+function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   const [showMenu, setShowMenu] = useState(mesa.status === 'ocupada' && mesa.items.length === 0);
   const [loading, setLoading]   = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -117,8 +147,23 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
   const [accountName, setAccountName] = useState('');
   const [room, setRoom] = useState('');
   const [accountNote, setAccountNote] = useState('');
+  const [invoiceRequested, setInvoiceRequested] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [customerTaxId, setCustomerTaxId] = useState('');
+  const [customerCity, setCustomerCity] = useState('');
 
   const total = mesa.items.reduce((s, i) => s + i.price * i.qty, 0);
+
+  function receiptPreview() {
+    return {
+      id:'PENDIENTE', mesa_id:mesa.id, mesa_numero:mesa.number || mesa.id,
+      items:mesa.items, total, payment_method:paymentMethod || 'por definir',
+      payment_reference:paymentReference, fecha:new Date().toLocaleDateString('es-EC'),
+      hora:new Date().toLocaleTimeString('es-EC', { hour:'2-digit', minute:'2-digit' }),
+      invoice_requested:invoiceRequested, customer_name:customerName,
+      customer_tax_id:customerTaxId, customer_city:customerCity,
+    };
+  }
 
   async function doOpen() {
     setLoading(true);
@@ -133,7 +178,7 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
       method:'POST',
       body: JSON.stringify({ item_id:item.id }),
     });
-    onRefresh();
+    await onRefresh();
   }
 
   async function changeQty(rowId, delta) {
@@ -175,17 +220,23 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
   }
 
   async function doCerrar(cobrado) {
+    const receiptWindow = cobrado ? window.open('', '_blank', 'width=420,height=700') : null;
     setLoading(true);
     try {
-      await api(`/api/mesas/${mesa.id}/cerrar`, {
+      const response = await api(`/api/mesas/${mesa.id}/cerrar`, {
         method:'POST', body:JSON.stringify({
           cobrado, payment_method:paymentMethod, payment_reference:paymentReference,
           account_type:accountType, account_name:accountName, room, account_note:accountNote,
+          invoice_requested:invoiceRequested, customer_name:customerName,
+          customer_tax_id:customerTaxId, customer_city:customerCity,
         }),
       });
+      const result = await response.json();
+      printSaleReceipt(result.sale || receiptPreview(), location, receiptWindow);
       onClose();
       await onRefresh();
     } catch (error) {
+      if (receiptWindow) receiptWindow.close();
       window.alert(error.message);
     } finally {
       setLoading(false);
@@ -201,7 +252,7 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
   }
 
   if (showMenu) return (
-    <MenuPanel mesaNumber={mesa.number || mesa.id} menu={menu} onAdd={addItem} onBack={() => setShowMenu(false)} />
+    <MenuPanel mesaNumber={mesa.number || mesa.id} menu={menu} orderItems={mesa.items} onAdd={addItem} onBack={() => setShowMenu(false)} />
   );
 
   return (
@@ -224,7 +275,7 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
       </div>
 
       {/* Items */}
-      <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
+      <div style={{ flex:mesa.status === 'pagando' ? '0 1 150px' : 1, minHeight:0, overflowY:'auto', padding:'12px 16px' }}>
         {mesa.items.length === 0 ? (
           <div style={{
             display:'flex', flexDirection:'column', alignItems:'center',
@@ -261,7 +312,10 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
       </div>
 
       {/* Footer */}
-      <div style={{ padding:'14px 16px', borderTop:`1px solid var(--border)` }}>
+      <div className={mesa.status === 'pagando' ? 'payment-scroll-area' : ''} style={{
+        padding:'14px 16px', borderTop:`1px solid var(--border)`,
+        ...(mesa.status === 'pagando' ? { flex:'1 1 auto', minHeight:0, overflowY:'auto', overscrollBehavior:'contain' } : {}),
+      }}>
         {mesa.status !== 'libre' && (
           <>
             <div style={{
@@ -280,6 +334,9 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
         {mesa.status === 'ocupada' && (<>
           <Btn onClick={() => setShowMenu(true)} color="amber-outline" style={{ marginBottom:8 }}>
             + Agregar del menú
+          </Btn>
+          <Btn onClick={() => printKitchenTicket(mesa, location)} disabled={mesa.items.length === 0} color="ghost" style={{ marginBottom:8 }}>
+            Imprimir comanda de cocina
           </Btn>
           <Btn onClick={doCobrar} disabled={total === 0 || loading} color="amber">
             Cobrar {fmt(total)}
@@ -319,8 +376,23 @@ function OrderPanel({ mesa, menu, onClose, onRefresh }) {
               <label><span>Nombre del responsable</span><input value={accountName} maxLength={100} onChange={e => setAccountName(e.target.value)} placeholder="Nombre completo" /></label>
               <label><span>Nota (opcional)</span><input value={accountNote} maxLength={150} onChange={e => setAccountNote(e.target.value)} placeholder="Detalle del cargo" /></label>
             </div>}
-            <Btn onClick={() => doCerrar(true)} disabled={loading || !paymentMethod || (paymentMethod === 'cuenta' && (!accountName.trim() || (accountType === 'habitacion' && !room.trim())))} color="green">
+            <div className="account-charge-form" style={{ marginTop:10 }}>
+              <label style={{ display:'flex', flexDirection:'row', alignItems:'center', gap:7 }}>
+                <input type="checkbox" checked={invoiceRequested} onChange={e => setInvoiceRequested(e.target.checked)}/>
+                <span>El cliente solicita factura</span>
+              </label>
+              {invoiceRequested && <>
+                <label><span>Nombre / Razón social</span><input value={customerName} maxLength={150} onChange={e => setCustomerName(e.target.value)} placeholder="Nombre del cliente o empresa" /></label>
+                <label><span>RUC / Cédula</span><input inputMode="numeric" value={customerTaxId} maxLength={13} onChange={e => setCustomerTaxId(e.target.value.replace(/\D/g, ''))} placeholder="10 o 13 dígitos" /></label>
+                <label><span>Ciudad</span><input value={customerCity} maxLength={100} onChange={e => setCustomerCity(e.target.value)} placeholder="Ej. Tena" /></label>
+              </>}
+            </div>
+            <Btn onClick={() => doCerrar(true)} disabled={loading || !paymentMethod || (paymentMethod === 'cuenta' && (!accountName.trim() || (accountType === 'habitacion' && !room.trim()))) ||
+              (invoiceRequested && (!customerName.trim() || !/^(\d{10}|\d{13})$/.test(customerTaxId) || !customerCity.trim()))} color="green">
               ✓ {paymentMethod === 'cuenta' ? 'Cargar consumo y liberar mesa' : `Confirmar ${paymentMethod ? `pago con ${paymentMethod}` : 'pago'}`}
+            </Btn>
+            <Btn onClick={() => printSaleReceipt(receiptPreview(), location)} disabled={mesa.items.length === 0} color="ghost" style={{ marginTop:7 }}>
+              Imprimir consumo
             </Btn>
             <Btn onClick={cancelPayment} disabled={loading} color="ghost" style={{ marginTop:7 }}>
               ← Cancelar cobro y continuar pedido
@@ -435,6 +507,7 @@ export default function Mesas({ location }) {
             key={selectedMesa.id + '-' + selectedMesa.status}
             mesa={selectedMesa}
             menu={menu}
+            location={location}
             onClose={() => setSelected(null)}
             onRefresh={load}
           />
