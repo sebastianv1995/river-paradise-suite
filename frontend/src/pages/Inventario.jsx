@@ -22,6 +22,16 @@ export default function Inventario() {
 
   useEffect(() => { load().catch(error => setMessage(`Error: ${error.message}`)); }, []);
 
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try { if (['menu','inventory'].includes(JSON.parse(event.data).type)) load().catch(error => setMessage(`Error: ${error.message}`)); }
+      catch (error) { console.error('No se pudo actualizar el inventario', error); }
+    };
+    const interval = window.setInterval(() => load().catch(console.error), 3000);
+    return () => { events.close(); window.clearInterval(interval); };
+  }, []);
+
   const totalStock = products.reduce((sum, product) => sum + product.stock, 0);
   const totalSold = products.reduce((sum, product) => sum + product.sold, 0);
   const lowStock = products.filter(product => product.stock <= product.stock_min).length;

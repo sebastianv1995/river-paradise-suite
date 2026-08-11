@@ -477,6 +477,7 @@ export default function Mesas({ location }) {
       try {
         const update = JSON.parse(event.data);
         if (update.type === 'mesas' && update.location_id === location) load().catch(console.error);
+        if (update.type === 'menu') api('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
       } catch (error) {
         console.error('No se pudo procesar la actualización en tiempo real', error);
       }
@@ -486,7 +487,10 @@ export default function Mesas({ location }) {
   }, [location, load]);
 
   useEffect(() => {
-    const refresh = () => load().catch(console.error);
+    const refresh = () => {
+      load().catch(console.error);
+      api('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
+    };
     const interval = window.setInterval(refresh, 2000);
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisible);

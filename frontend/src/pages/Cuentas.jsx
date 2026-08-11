@@ -24,6 +24,17 @@ export default function Cuentas({ location }) {
     setAccounts(result); setMenu(await menuResponse.json());
   }
   useEffect(() => { load().catch(error => setMessage(`Error: ${error.message}`)); }, []);
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try {
+        if (JSON.parse(event.data).type === 'menu') fetch('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
+      } catch (error) { console.error('No se pudo actualizar la carta', error); }
+    };
+    const refreshMenu = () => fetch('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
+    const interval = window.setInterval(refreshMenu, 3000);
+    return () => { events.close(); window.clearInterval(interval); };
+  }, []);
 
   const visible = accounts.filter(account => showClosed || account.balance > 0);
   const selected = accounts.find(account => account.id === selectedId);

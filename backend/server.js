@@ -257,6 +257,7 @@ async function polishWorkbook(workbook, summarySheets = []) {
 // ── CARTA ─────────────────────────────────────────────────────
 
 app.get('/api/menu', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.json(loadMenu());
 });
 
@@ -296,6 +297,7 @@ app.post('/api/menu', (req, res) => {
   menu[category] ||= [];
   menu[category].push(product);
   saveMenu(menu);
+  broadcastLive({ type:'menu' });
   res.status(201).json({ product, menu });
 });
 
@@ -335,6 +337,7 @@ app.put('/api/menu/:itemId', (req, res) => {
     delete product.stock_min;
   }
   saveMenu(menu);
+  broadcastLive({ type:'menu' });
   res.json(product);
 });
 
@@ -378,6 +381,7 @@ app.post('/api/inventory/:itemId/entries', (req, res) => {
     date: new Date().toISOString(),
   });
   saveDB(db);
+  broadcastLive({ type:'inventory', item_id:product.id });
   res.json({ ok:true, stock:stockFor(db, product.id), units_added:quantity });
 });
 
@@ -400,6 +404,7 @@ app.post('/api/inventory/:itemId/adjustments', (req, res) => {
     note, date:new Date().toISOString(),
   });
   saveDB(db);
+  broadcastLive({ type:'inventory', item_id:product.id });
   res.json({ ok:true, stock:stockFor(db, product.id) });
 });
 
@@ -487,6 +492,7 @@ app.post('/api/accounts/:id/charges', (req, res) => {
     venta_id:saleId, location_id:location, date:new Date().toISOString(), note:`Cuenta ${account.name} · Hab. ${account.room || '-'}`,
   });
   saveDB(db);
+  if (Object.keys(stockRequirements).length) broadcastLive({ type:'inventory' });
   res.status(201).json(accountSummary(account, db.ventas));
 });
 
@@ -653,6 +659,7 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
   const db   = loadDB();
   const mesa = requireMesa(db, req.params.id, res);
   let createdSale = null;
+  let inventoryChanged = false;
   if (!mesa) return;
   if (mesa.status === 'libre') return res.status(409).json({ error: 'La mesa ya está cerrada' });
   if (req.body.cobrado && mesa.status !== 'pagando') return res.status(409).json({ error: 'Primero debe marcar la mesa para cobrar' });
@@ -740,12 +747,14 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
         quantity:-quantity, venta_id:ventaId, location_id:mesa.location_id, date:new Date().toISOString(), note:`Mesa ${mesa.number} · ${mesa.location_id}`,
       });
     }
+    inventoryChanged = Object.keys(stockRequirements).length > 0;
   }
   mesa.status   = 'libre';
   mesa.openedAt = null;
   mesa.items    = [];
   saveDB(db);
   broadcastMesaChange(mesa);
+  if (inventoryChanged) broadcastLive({ type:'inventory' });
   let receiptPrinted = false;
   let receiptError = '';
   if (createdSale) {

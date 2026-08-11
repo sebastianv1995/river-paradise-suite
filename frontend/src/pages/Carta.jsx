@@ -13,14 +13,25 @@ export default function Carta() {
   const [creating, setCreating] = useState(false);
   const [newProduct, setNewProduct] = useState({ category:'', name:'', desc:'', price:'', track_stock:false, stock_min:0 });
 
+  async function loadMenu() {
+    const response = await fetch('/api/menu');
+    if (!response.ok) throw new Error('No se pudo cargar la carta');
+    const data = await response.json();
+    setMenu(data);
+    setDrafts(Object.fromEntries(Object.values(data).flat().map(item => [item.id, { ...item }])));
+  }
+
   useEffect(() => {
-    fetch('/api/menu').then(async response => {
-      if (!response.ok) throw new Error('No se pudo cargar la carta');
-      return response.json();
-    }).then(data => {
-      setMenu(data);
-      setDrafts(Object.fromEntries(Object.values(data).flat().map(item => [item.id, { ...item }])));
-    }).catch(error => setMessage(error.message));
+    loadMenu().catch(error => setMessage(error.message));
+  }, []);
+
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try { if (JSON.parse(event.data).type === 'menu') loadMenu().catch(error => setMessage(error.message)); }
+      catch (error) { console.error('No se pudo actualizar la carta', error); }
+    };
+    return () => events.close();
   }, []);
 
   function change(id, field, value) {
