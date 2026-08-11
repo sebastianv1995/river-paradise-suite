@@ -4,6 +4,9 @@ const ExcelJS = require('exceljs');
 const fs      = require('fs');
 const path    = require('path');
 const crypto  = require('crypto');
+const os      = require('os');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 
 const app     = express();
 const PORT    = Number(process.env.PORT) || 3001;
@@ -11,6 +14,11 @@ const DB_FILE = process.env.DB_FILE ? path.resolve(process.env.DB_FILE) : path.j
 const MENU_FILE = path.join(__dirname, '..', 'menu.json');
 const LOCATIONS = ['restaurante', 'cafeteria'];
 const EXCEL_PROTECTION_PASSWORD = process.env.EXCEL_PROTECTION_PASSWORD || crypto.randomBytes(24).toString('hex');
+const liveClients = new Set();
+const execFileAsync = promisify(execFile);
+const KITCHEN_PRINTER = process.env.KITCHEN_PRINTER || 'SAT 22TUS';
+const PRINT_SCRIPT = path.join(__dirname, 'print-ticket.ps1');
+const RECEIPT_PRINT_SCRIPT = path.join(__dirname, 'print-receipt.ps1');
 
 // ── Base de datos JSON ────────────────────────────────────────
 function loadDB() {
@@ -30,6 +38,8 @@ function loadDB() {
       _nextAccountChargeId: 1,
       _nextAccountPaymentId: 1,
       _nextAccountWriteoffId: 1,
+      print_jobs: [],
+      _nextPrintJobId: 1,
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2));
     return initial;
@@ -44,6 +54,8 @@ function loadDB() {
   db._nextAccountChargeId ||= 1;
   db._nextAccountPaymentId ||= 1;
   db._nextAccountWriteoffId ||= 1;
+  db.print_jobs ||= [];
+  db._nextPrintJobId ||= 1;
   for (const mesa of db.mesas) {
     mesa.location_id ||= 'restaurante';
     mesa.number ||= mesa.id;
@@ -125,6 +137,64 @@ function validLocation(value) {
   return LOCATIONS.includes(value) ? value : null;
 }
 
+function broadcastLive(event) {
+  const payload = `data: ${JSON.stringify({ ...event, at:Date.now() })}\n\n`;
+  for (const client of liveClients) client.write(payload);
+}
+
+function broadcastMesaChange(mesa) {
+  broadcastLive({ type:'mesas', location_id:mesa.location_id });
+}
+
+function kitchenTicketData(mesa) {
+  return {
+    title:'COMANDA DE COCINA',
+    location:mesa.location_id === 'cafeteria' ? 'Cafetería' : 'Restaurante',
+    table:`Mesa ${mesa.number || mesa.id}`,
+    date:new Date().toLocaleString('es-EC'),
+    items:mesa.items.map(item => ({ quantity:item.qty, name:item.name })),
+    footer:'Verifique cantidades antes de preparar.',
+  };
+}
+
+async function printKitchenTicket(mesa) {
+  const ticketPath = path.join(os.tmpdir(), `river-kitchen-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`);
+  await fs.promises.writeFile(ticketPath, JSON.stringify(kitchenTicketData(mesa)), 'utf8');
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PRINT_SCRIPT,
+      '-TicketPath', ticketPath, '-PrinterName', KITCHEN_PRINTER], { windowsHide:true, timeout:20000 });
+  } finally {
+    await fs.promises.unlink(ticketPath).catch(() => {});
+  }
+}
+
+function receiptTicketData(sale) {
+  return {
+    title:'RIVER PARADISE', subtitle:'COMPROBANTE DE CONSUMO',
+    location:sale.location_id === 'cafeteria' ? 'Cafetería' : 'Restaurante',
+    reference:`Venta #${sale.id} · ${sale.source === 'cuenta' ? `Habitación ${sale.account_room || '-'}` : `Mesa ${sale.mesa_numero || sale.mesa_id}`}`,
+    date:`${sale.fecha} ${sale.hora}`,
+    items:(sale.items || []).map(item => ({ quantity:item.qty, name:item.name, unit_price:item.price, subtotal:fmt(item.price * item.qty) })),
+    total:sale.total,
+    payment:sale.payment_method === 'cuenta' ? 'Cargado a cuenta' : sale.payment_method,
+    payment_reference:sale.payment_reference || '',
+    invoice_requested:sale.invoice_requested === true,
+    customer_name:sale.customer_name || 'CONSUMIDOR FINAL',
+    customer_tax_id:sale.customer_tax_id || '', customer_city:sale.customer_city || '',
+  };
+}
+
+async function printCustomerReceipt(sale) {
+  const receiptPath = path.join(os.tmpdir(), `river-receipt-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`);
+  await fs.promises.writeFile(receiptPath, JSON.stringify(receiptTicketData(sale)), 'utf8');
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', RECEIPT_PRINT_SCRIPT,
+      '-TicketPath', receiptPath, '-PrinterName', KITCHEN_PRINTER], { windowsHide:true, timeout:20000 });
+  } finally {
+    await fs.promises.unlink(receiptPath).catch(() => {});
+  }
+}
+
 async function polishWorkbook(workbook, summarySheets = []) {
   workbook.creator = 'River Paradise';
   workbook.company = 'River Paradise';
@@ -188,6 +258,17 @@ async function polishWorkbook(workbook, summarySheets = []) {
 
 app.get('/api/menu', (req, res) => {
   res.json(loadMenu());
+});
+
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ type:'connected', at:Date.now() })}\n\n`);
+  liveClients.add(res);
+  const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 25000);
+  req.on('close', () => { clearInterval(heartbeat); liveClients.delete(res); });
 });
 
 app.post('/api/menu', (req, res) => {
@@ -454,6 +535,34 @@ app.get('/api/mesas', (req, res) => {
   res.json(db.mesas.filter(m => m.location_id === location).map(m => ({ ...m, total: mesaTotal(m) })));
 });
 
+app.post('/api/mesas/:id/print-kitchen', async (req, res) => {
+  let db = loadDB();
+  const mesa = requireMesa(db, req.params.id, res);
+  if (!mesa) return;
+  if (mesa.status === 'libre' || !mesa.items.length) return res.status(409).json({ error:'La mesa no tiene una comanda para imprimir' });
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ mesa:mesa.id, openedAt:mesa.openedAt, items:mesa.items })).digest('hex');
+  const recent = [...db.print_jobs].reverse().find(job => job.fingerprint === fingerprint && job.status === 'printed' && Date.now() - new Date(job.created_at).getTime() < 10000);
+  if (recent && req.body.force !== true) return res.json({ ok:true, duplicate:true, job:recent });
+  const job = { id:db._nextPrintJobId++, type:'kitchen', mesa_id:mesa.id, mesa_numero:mesa.number,
+    location_id:mesa.location_id, printer:KITCHEN_PRINTER, fingerprint, status:'pending',
+    items:mesa.items.map(item => ({ item_id:item.item_id, name:item.name, qty:item.qty })), created_at:new Date().toISOString() };
+  db.print_jobs.push(job); saveDB(db);
+  try {
+    await printKitchenTicket(mesa);
+    db = loadDB();
+    const savedJob = db.print_jobs.find(item => item.id === job.id);
+    if (savedJob) { savedJob.status = 'printed'; savedJob.printed_at = new Date().toISOString(); }
+    saveDB(db);
+    res.json({ ok:true, job:savedJob || job });
+  } catch (error) {
+    db = loadDB();
+    const savedJob = db.print_jobs.find(item => item.id === job.id);
+    if (savedJob) { savedJob.status = 'error'; savedJob.error = String(error.stderr || error.message || error).slice(0, 500); }
+    saveDB(db);
+    res.status(500).json({ error:`No se pudo imprimir en ${KITCHEN_PRINTER}. Verifica que esté encendida, conectada y con papel.` });
+  }
+});
+
 app.post('/api/mesas/:id/open', (req, res) => {
   const db   = loadDB();
   const mesa = requireMesa(db, req.params.id, res);
@@ -462,6 +571,7 @@ app.post('/api/mesas/:id/open', (req, res) => {
   mesa.status   = 'ocupada';
   mesa.openedAt = new Date().toISOString();
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
@@ -484,6 +594,7 @@ app.post('/api/mesas/:id/items', (req, res) => {
     mesa.items.push({ id: rowId, item_id, name: product.name, price: product.price, qty: 1 });
   }
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
@@ -499,6 +610,7 @@ app.put('/api/mesas/:id/items/:rowId', (req, res) => {
   mesa.items[idx].qty += delta;
   if (mesa.items[idx].qty <= 0) mesa.items.splice(idx, 1);
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
@@ -509,6 +621,7 @@ app.delete('/api/mesas/:id/items/:rowId', (req, res) => {
   if (mesa.status !== 'ocupada') return res.status(409).json({ error: 'No se puede modificar esta mesa' });
   mesa.items = mesa.items.filter(i => i.id !== Number(req.params.rowId));
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
@@ -519,6 +632,7 @@ app.post('/api/mesas/:id/cobrar', (req, res) => {
   if (mesa.status !== 'ocupada' || mesa.items.length === 0) return res.status(409).json({ error: 'La mesa no tiene un pedido para cobrar' });
   mesa.status = 'pagando';
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
@@ -531,10 +645,11 @@ app.post('/api/mesas/:id/cancelar-cobro', (req, res) => {
   }
   mesa.status = 'ocupada';
   saveDB(db);
+  broadcastMesaChange(mesa);
   sendMesa(res, mesa);
 });
 
-app.post('/api/mesas/:id/cerrar', (req, res) => {
+app.post('/api/mesas/:id/cerrar', async (req, res) => {
   const db   = loadDB();
   const mesa = requireMesa(db, req.params.id, res);
   let createdSale = null;
@@ -630,7 +745,19 @@ app.post('/api/mesas/:id/cerrar', (req, res) => {
   mesa.openedAt = null;
   mesa.items    = [];
   saveDB(db);
-  res.json({ ok:true, sale:createdSale });
+  broadcastMesaChange(mesa);
+  let receiptPrinted = false;
+  let receiptError = '';
+  if (createdSale) {
+    try { await printCustomerReceipt(createdSale); receiptPrinted = true; }
+    catch (error) { receiptError = `No se pudo imprimir en ${KITCHEN_PRINTER}. La venta sí quedó guardada.`; }
+    const latest = loadDB();
+    latest.print_jobs.push({ id:latest._nextPrintJobId++, type:'receipt', sale_id:createdSale.id,
+      location_id:createdSale.location_id, printer:KITCHEN_PRINTER, status:receiptPrinted ? 'printed' : 'error',
+      error:receiptError, created_at:new Date().toISOString(), printed_at:receiptPrinted ? new Date().toISOString() : null });
+    saveDB(latest);
+  }
+  res.json({ ok:true, sale:createdSale, receipt_printed:receiptPrinted, receipt_error:receiptError });
 });
 
 // ── VENTAS ────────────────────────────────────────────────────
@@ -640,6 +767,26 @@ app.get('/api/ventas', (req, res) => {
   const fecha = req.query.fecha || todayStr();
   const location = validLocation(req.query.location);
   res.json(db.ventas.filter(v => v.fecha === fecha && (!location || v.location_id === location)).reverse());
+});
+
+app.post('/api/ventas/:id/print-receipt', async (req, res) => {
+  let db = loadDB();
+  const sale = db.ventas.find(item => item.id === Number(req.params.id));
+  if (!sale) return res.status(404).json({ error:'Venta no encontrada' });
+  try {
+    await printCustomerReceipt(sale);
+    db = loadDB();
+    db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', sale_id:sale.id, location_id:sale.location_id,
+      printer:KITCHEN_PRINTER, status:'printed', created_at:new Date().toISOString(), printed_at:new Date().toISOString() });
+    saveDB(db);
+    res.json({ ok:true });
+  } catch (error) {
+    db = loadDB();
+    db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', sale_id:sale.id, location_id:sale.location_id,
+      printer:KITCHEN_PRINTER, status:'error', error:String(error.stderr || error.message || error).slice(0,500), created_at:new Date().toISOString() });
+    saveDB(db);
+    res.status(500).json({ error:`No se pudo imprimir en ${KITCHEN_PRINTER}. Verifica que esté encendida, conectada y con papel.` });
+  }
 });
 
 // ── REPORTES GENERALES ────────────────────────────────────────

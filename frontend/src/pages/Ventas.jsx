@@ -7,6 +7,7 @@ export default function Ventas({ location }) {
   const [ventas,  setVentas]  = useState([]);
   const [loading, setLoading] = useState(true);
   const [fecha,   setFecha]   = useState('');
+  const [printingId, setPrintingId] = useState(null);
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('es-EC', { day:'2-digit', month:'2-digit', year:'numeric' });
@@ -22,6 +23,20 @@ export default function Ventas({ location }) {
   }
 
   const total    = ventas.reduce((s, v) => s + v.total, 0);
+
+  async function sendReceiptToPrinter(sale) {
+    setPrintingId(sale.id);
+    try {
+      const response = await fetch(`/api/ventas/${sale.id}/print-receipt`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:'{}' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'No se pudo imprimir el comprobante');
+      window.alert('Comprobante enviado correctamente a la impresora.');
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      setPrintingId(null);
+    }
+  }
 
   return (
     <div className="sales-page" style={{ padding:16, overflowY:'auto', flex:1 }}>
@@ -104,8 +119,11 @@ export default function Ventas({ location }) {
                 </div>}
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginLeft:12 }}>
+                <button disabled={printingId === v.id} onClick={() => sendReceiptToPrinter(v)} style={{ padding:'6px 9px', border:'1px solid var(--green)', borderRadius:7, background:'var(--green-light)', color:'var(--green)', fontSize:11, cursor:'pointer' }}>
+                  {printingId === v.id ? 'Enviando…' : 'Reimprimir en caja'}
+                </button>
                 <button onClick={() => printSaleReceipt(v, location)} style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'#fff', fontSize:11, cursor:'pointer' }}>
-                  Imprimir respaldo
+                  Vista previa
                 </button>
                 <div style={{ fontWeight:600, fontSize:15, color:'var(--green)', whiteSpace:'nowrap' }}>{fmt(v.total)}</div>
               </div>

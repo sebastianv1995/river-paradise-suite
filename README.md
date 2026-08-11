@@ -157,6 +157,12 @@ se registra la primera entrada y las entregas posteriores.
 
 - En una mesa ocupada, usar **Imprimir comanda de cocina** para imprimir el pedido
   actual en papel térmico (recomendado: 80 mm) o en una impresora normal.
+- **Enviar comanda a cocina** manda el pedido desde cualquier teléfono o tablet al
+  servidor y la computadora principal lo imprime directamente en la impresora USB
+  `SAT 22TUS`. El móvil no necesita tener instalada la impresora. La computadora,
+  el sistema y la impresora deben permanecer encendidos. Si cambia la red, abre en
+  el móvil la nueva dirección `Network` mostrada por el frontend; la configuración
+  de la impresora USB no cambia.
 - En **Ventas**, usar **Imprimir respaldo** para entregar al cliente un comprobante
   del consumo y forma de pago. Se puede imprimir en papel o guardar como PDF.
 - Al confirmar un pago o una carga a cuenta, el comprobante se abre automáticamente

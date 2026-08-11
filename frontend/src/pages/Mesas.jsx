@@ -141,6 +141,8 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
 function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   const [showMenu, setShowMenu] = useState(mesa.status === 'ocupada' && mesa.items.length === 0);
   const [loading, setLoading]   = useState(false);
+  const [printingKitchen, setPrintingKitchen] = useState(false);
+  const [kitchenSentSignature, setKitchenSentSignature] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [accountType, setAccountType] = useState('habitacion');
@@ -153,6 +155,8 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   const [customerCity, setCustomerCity] = useState('');
 
   const total = mesa.items.reduce((s, i) => s + i.price * i.qty, 0);
+  const kitchenOrderSignature = JSON.stringify(mesa.items.map(item => [item.item_id, item.qty]));
+  const kitchenSent = kitchenSentSignature === kitchenOrderSignature;
 
   function receiptPreview() {
     return {
@@ -205,6 +209,22 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
     }
   }
 
+  async function sendToKitchen(force=false) {
+    setPrintingKitchen(true);
+    try {
+      const response = await api(`/api/mesas/${mesa.id}/print-kitchen`, {
+        method:'POST', body:JSON.stringify({ force }),
+      });
+      const result = await response.json();
+      if (!result.duplicate) setKitchenSentSignature(kitchenOrderSignature);
+      window.alert(result.duplicate ? 'Esta misma comanda ya fue enviada hace pocos segundos.' : 'Comanda enviada correctamente a la impresora de cocina.');
+    } catch (error) {
+      window.alert(error.message);
+    } finally {
+      setPrintingKitchen(false);
+    }
+  }
+
   async function cancelPayment() {
     setLoading(true);
     try {
@@ -220,7 +240,6 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   }
 
   async function doCerrar(cobrado) {
-    const receiptWindow = cobrado ? window.open('', '_blank', 'width=420,height=700') : null;
     setLoading(true);
     try {
       const response = await api(`/api/mesas/${mesa.id}/cerrar`, {
@@ -232,11 +251,10 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
         }),
       });
       const result = await response.json();
-      printSaleReceipt(result.sale || receiptPreview(), location, receiptWindow);
+      if (cobrado && result.receipt_error) window.alert(result.receipt_error);
       onClose();
       await onRefresh();
     } catch (error) {
-      if (receiptWindow) receiptWindow.close();
       window.alert(error.message);
     } finally {
       setLoading(false);
@@ -335,8 +353,11 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
           <Btn onClick={() => setShowMenu(true)} color="amber-outline" style={{ marginBottom:8 }}>
             + Agregar del menú
           </Btn>
+          <Btn onClick={() => sendToKitchen(kitchenSent)} disabled={mesa.items.length === 0 || printingKitchen} color="ghost" style={{ marginBottom:8 }}>
+            {printingKitchen ? 'Enviando a cocina…' : kitchenSent ? 'Reimprimir comanda' : 'Enviar comanda a cocina'}
+          </Btn>
           <Btn onClick={() => printKitchenTicket(mesa, location)} disabled={mesa.items.length === 0} color="ghost" style={{ marginBottom:8 }}>
-            Imprimir comanda de cocina
+            Vista previa / imprimir en este dispositivo
           </Btn>
           <Btn onClick={doCobrar} disabled={total === 0 || loading} color="amber">
             Cobrar {fmt(total)}
@@ -446,13 +467,36 @@ export default function Mesas({ location }) {
   const load = useCallback(async () => {
     const data = await api(`/api/mesas?location=${location}`).then(r => r.json());
     setMesas(data);
-    if (selected) {
-      const updated = data.find(m => m.id === selected);
-      if (updated) setSelected(updated.id);
-    }
-  }, [selected, location]);
+  }, [location]);
 
   useEffect(() => { setSelected(null); load(); }, [location]);
+
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try {
+        const update = JSON.parse(event.data);
+        if (update.type === 'mesas' && update.location_id === location) load().catch(console.error);
+      } catch (error) {
+        console.error('No se pudo procesar la actualización en tiempo real', error);
+      }
+    };
+    events.onerror = () => { /* EventSource se reconecta automáticamente. */ };
+    return () => events.close();
+  }, [location, load]);
+
+  useEffect(() => {
+    const refresh = () => load().catch(console.error);
+    const interval = window.setInterval(refresh, 2000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [load]);
 
   useEffect(() => {
     api('/api/menu').then(r => r.json()).then(setMenu).catch(console.error);
