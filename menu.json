@@ -110,13 +110,20 @@
       "id": "a2",
       "name": "Volquetero",
       "desc": "Atún, tostado, chochos, chifles y curtido",
-      "price": 7
+      "price": 7,
+      "stock_components": [
+        { "item_id": "inv_atun", "quantity": 1 },
+        { "item_id": "inv_chochos_porcion", "quantity": 1 }
+      ]
     },
     {
       "id": "c5",
       "name": "Nachos",
       "desc": "Con queso, guacamole y pico de gallo",
-      "price": 4.5
+      "price": 4.5,
+      "stock_components": [
+        { "item_id": "inv_nachos_porcion", "quantity": 1 }
+      ]
     },
     {
       "id": "c2",
@@ -128,7 +135,10 @@
       "id": "c8",
       "name": "Porción de empanadas",
       "desc": "2 empanadas de queso",
-      "price": 3
+      "price": 3,
+      "stock_components": [
+        { "item_id": "inv_empanada_disco", "quantity": 2 }
+      ]
     },
     {
       "id": "c9",
@@ -236,7 +246,7 @@
       "id": "tab_lark",
       "name": "Lark",
       "desc": "Venta por unidad; caja de 10 cigarrillos",
-      "price": 0.5,
+      "price": 1,
       "track_stock": true,
       "stock_min": 10,
       "package_size": 10,
@@ -258,7 +268,10 @@
       "id": "b7",
       "name": "Michelada",
       "desc": "Maracuyá o limón",
-      "price": 5
+      "price": 5,
+      "stock_components": [
+        { "item_id": "inv_amstel_lata", "quantity": 2 }
+      ]
     },
     {
       "id": "a10",
@@ -293,12 +306,44 @@
       "stock_min": 6
     },
     {
-      "id": "a14",
-      "name": "Vinos",
+      "id": "vino_concha_toro",
+      "name": "Concha de Toro 750 ml",
       "desc": "Botella",
-      "price": 0,
+      "price": 20,
       "track_stock": true,
-      "stock_min": 2
+      "stock_min": 1
+    },
+    {
+      "id": "vino_blue_nun",
+      "name": "Blue Nun 750 ml",
+      "desc": "Botella",
+      "price": 35,
+      "track_stock": true,
+      "stock_min": 1
+    },
+    {
+      "id": "vino_sandara",
+      "name": "Sandara 750 ml",
+      "desc": "Botella",
+      "price": 20,
+      "track_stock": true,
+      "stock_min": 1
+    },
+    {
+      "id": "vino_grand_vandush",
+      "name": "Grand Vandush 750 ml",
+      "desc": "Botella",
+      "price": 20,
+      "track_stock": true,
+      "stock_min": 1
+    },
+    {
+      "id": "vino_giacobazzi",
+      "name": "Giacobazzi 750 ml",
+      "desc": "Botella",
+      "price": 20,
+      "track_stock": true,
+      "stock_min": 1
     },
     {
       "id": "a15",
@@ -323,6 +368,53 @@
           "quantity": 3
         }
       ]
+    }
+  ],
+  "Insumos de inventario": [
+    {
+      "id": "inv_empanada_disco",
+      "name": "Discos de empanada",
+      "desc": "Insumo: 2 discos por porción de empanadas",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 12,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_chochos_porcion",
+      "name": "Chochos (media funda de 500 g)",
+      "desc": "Insumo: 1 porción por Volquetero",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_atun",
+      "name": "Atún en lata",
+      "desc": "Insumo: 1 lata por Volquetero",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_nachos_porcion",
+      "name": "Nachos (porción)",
+      "desc": "Insumo: 7 platos por funda grande",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_amstel_lata",
+      "name": "Cerveza Amstel en lata",
+      "desc": "Insumo exclusivo: 2 latas por Michelada",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 10,
+      "inventory_only": true
     }
   ]
 }

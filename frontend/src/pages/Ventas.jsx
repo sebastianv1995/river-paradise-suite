@@ -15,8 +15,21 @@ export default function Ventas({ location }) {
     load(today);
   }, [location]);
 
-  async function load(f) {
-    setLoading(true);
+  useEffect(() => {
+    if (!fecha) return undefined;
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try {
+        const update = JSON.parse(event.data);
+        if (update.type === 'sales' && (!update.location_id || update.location_id === location)) load(fecha, false);
+      } catch (error) { console.error('No se pudo actualizar las ventas', error); }
+    };
+    const interval = window.setInterval(() => load(fecha, false), 5000);
+    return () => { events.close(); window.clearInterval(interval); };
+  }, [fecha, location]);
+
+  async function load(f, showLoading=true) {
+    if (showLoading) setLoading(true);
     const data = await fetch(`/api/ventas?fecha=${encodeURIComponent(f)}&location=${location}`).then(r => r.json());
     setVentas(data);
     setLoading(false);

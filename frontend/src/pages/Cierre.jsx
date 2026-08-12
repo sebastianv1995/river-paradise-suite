@@ -147,6 +147,7 @@ function InfoRow({ label, value }) {
 // ── Cierre page ────────────────────────────────────────────────
 export default function Cierre({ location }) {
   const [cierres,   setCierres]   = useState([]);
+  const [allClosings, setAllClosings] = useState([]);
   const [ventas,    setVentas]    = useState([]);
   const [cashMovements, setCashMovements] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -158,22 +159,36 @@ export default function Cierre({ location }) {
 
   const today = new Date().toLocaleDateString('es-EC', { day:'2-digit', month:'2-digit', year:'numeric' });
 
-  async function load() {
-    setLoading(true);
-    const [c, v, cash, accountData] = await Promise.all([
+  async function load(showLoading=false) {
+    if (showLoading) setLoading(true);
+    const [c, all, v, cash, accountData] = await Promise.all([
       fetch(`/api/cierres?location=${location}`).then(r => r.json()),
+      fetch('/api/cierres').then(r => r.json()),
       fetch(`/api/ventas?fecha=${encodeURIComponent(today)}&location=${location}`).then(r => r.json()),
       fetch(`/api/cash-movements?fecha=${encodeURIComponent(today)}&location=${location}`).then(r => r.json()),
       fetch('/api/accounts').then(r => r.json()),
     ]);
     setCierres(c);
+    setAllClosings(all);
     setVentas(v);
     setCashMovements(cash);
     setAccounts(accountData);
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, [location]);
+  useEffect(() => { load(true); }, [location]);
+
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    events.onmessage = event => {
+      try {
+        const update = JSON.parse(event.data);
+        if (['sales','cash','accounts','closing'].includes(update.type)) load();
+      } catch (error) { console.error('No se pudo actualizar el cierre', error); }
+    };
+    const interval = window.setInterval(load, 5000);
+    return () => { events.close(); window.clearInterval(interval); };
+  }, [location]);
 
   async function doCierre() {
     if ((!ventas.length && !cashMovements.length && !accountPayments.length) || yaCerroHoy || saving) return;
@@ -207,6 +222,17 @@ export default function Cierre({ location }) {
   const totalCaja    = fondoNum + totalEfectivo + cashIncomes - cashExpenses;
   const yaCerroHoy   = cierres.some(c => c.fecha === today);
   const hasActivity  = ventas.length > 0 || cashMovements.length > 0 || accountPayments.length > 0;
+  const todayClosings = allClosings.filter(closing => closing.fecha === today);
+  const closingByLocation = Object.fromEntries(todayClosings.map(closing => [closing.location_id, closing]));
+  const generalClosing = todayClosings.reduce((summary, closing) => ({
+    sales:summary.sales + Number(closing.total_ventas || 0),
+    cash:summary.cash + Number(closing.total_efectivo || 0),
+    card:summary.card + Number(closing.total_tarjeta || 0),
+    transfer:summary.transfer + Number(closing.total_transferencia || 0),
+    accounts:summary.accounts + Number(closing.total_cuentas || 0),
+    accountPayments:summary.accountPayments + Number(closing.total_cobros_cuentas || 0),
+    cashBoxes:summary.cashBoxes + Number(closing.total_caja || 0),
+  }), { sales:0, cash:0, card:0, transfer:0, accounts:0, accountPayments:0, cashBoxes:0 });
 
   const topMap = {};
   for (const v of ventas) for (const it of v.items||[]) {
@@ -258,6 +284,27 @@ export default function Cierre({ location }) {
             🔒 {saving ? 'Cerrando...' : yaCerroHoy ? 'Caja cerrada' : 'Cerrar caja'}
           </button>
         </div>
+
+        <Card icon="∑" title="Cierre general de Restaurante + Cafetería">
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:8, marginBottom:10 }}>
+            {[
+              ['restaurante', 'Restaurante'], ['cafeteria', 'Cafetería'],
+            ].map(([id, label]) => <div key={id} style={{ padding:'9px 11px', borderRadius:8, background:'var(--bg2)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:12 }}><strong>{label}</strong><span style={{ color:closingByLocation[id] ? 'var(--green)' : 'var(--amber)' }}>{closingByLocation[id] ? 'Cerrado' : 'Pendiente'}</span></div>
+              <div style={{ marginTop:4, fontSize:15, fontWeight:600 }}>{fmt(closingByLocation[id]?.total_ventas || 0)}</div>
+            </div>)}
+          </div>
+          {[
+            ['Ventas consolidadas', fmt(generalClosing.sales)],
+            ['Efectivo', fmt(generalClosing.cash)],
+            ['Tarjeta', fmt(generalClosing.card)],
+            ['Transferencia', fmt(generalClosing.transfer)],
+            ['Cargado a cuentas', fmt(generalClosing.accounts)],
+            ['Cobros posteriores de cuentas', fmt(generalClosing.accountPayments)],
+            ['Efectivo físico total en ambas cajas', fmt(generalClosing.cashBoxes)],
+          ].map(([label, value]) => <InfoRow key={label} label={label} value={value}/>) }
+          <div style={{ fontSize:11, color:'var(--text3)', marginTop:8 }}>El consolidado es informativo: cada caja conserva su propio fondo, ventas, pagos y cierre.</div>
+        </Card>
 
         {/* Fondo inicial */}
         <Card icon="💰" title="Fondo inicial de caja">

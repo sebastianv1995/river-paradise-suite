@@ -44,7 +44,7 @@ export default function App() {
         </button>)}
       </nav>
 
-      <div className="sidebar-status"><i/><div><strong>Sistema local</strong><span>Datos guardados en este equipo</span></div></div>
+      <div className="sidebar-status"><i/><div><strong>Sistema central conectado</strong><span>Restaurante y cafetería sincronizados</span></div></div>
     </aside>
 
     <div className="workspace">

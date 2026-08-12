@@ -258,7 +258,11 @@ async function polishWorkbook(workbook, summarySheets = []) {
 
 app.get('/api/menu', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json(loadMenu());
+  const menu = loadMenu();
+  const publicMenu = Object.fromEntries(Object.entries(menu)
+    .map(([category, items]) => [category, items.filter(item => item.inventory_only !== true)])
+    .filter(([, items]) => items.length > 0));
+  res.json(publicMenu);
 });
 
 app.get('/api/events', (req, res) => {
@@ -437,6 +441,7 @@ app.post('/api/cash-movements', (req, res) => {
   };
   db.movimientos_caja.push(movement);
   saveDB(db);
+  broadcastLive({ type:'cash', location_id:location });
   res.json(movement);
 });
 
@@ -492,6 +497,8 @@ app.post('/api/accounts/:id/charges', (req, res) => {
     venta_id:saleId, location_id:location, date:new Date().toISOString(), note:`Cuenta ${account.name} · Hab. ${account.room || '-'}`,
   });
   saveDB(db);
+  broadcastLive({ type:'sales', location_id:location });
+  broadcastLive({ type:'accounts', location_id:location });
   if (Object.keys(stockRequirements).length) broadcastLive({ type:'inventory' });
   res.status(201).json(accountSummary(account, db.ventas));
 });
@@ -513,6 +520,7 @@ app.post('/api/accounts/:id/payments', (req, res) => {
   account.payments.push({ id:db._nextAccountPaymentId++, amount, payment_method:method,
     payment_reference:reference, fecha:todayStr(), hora:nowTime(), cierre_id:null, location_id:location });
   saveDB(db);
+  broadcastLive({ type:'accounts', location_id:location });
   res.json(accountSummary(account));
 });
 
@@ -530,6 +538,7 @@ app.post('/api/accounts/:id/internal', (req, res) => {
   account.writeoffs ||= [];
   account.writeoffs.push({ id:db._nextAccountWriteoffId++, amount, note, fecha:todayStr(), hora:nowTime(), location_id:location });
   saveDB(db);
+  broadcastLive({ type:'accounts', location_id:location });
   res.json(accountSummary(account));
 });
 
@@ -754,6 +763,7 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
   mesa.items    = [];
   saveDB(db);
   broadcastMesaChange(mesa);
+  if (createdSale) broadcastLive({ type:'sales', location_id:createdSale.location_id });
   if (inventoryChanged) broadcastLive({ type:'inventory' });
   let receiptPrinted = false;
   let receiptError = '';
@@ -1020,6 +1030,7 @@ app.post('/api/cierres', (req, res) => {
     if (payment.fecha === fecha && payment.location_id === location && !payment.cierre_id) payment.cierre_id = cierre.id;
   }
   saveDB(db);
+  broadcastLive({ type:'closing', location_id:location, closing_id:cierre.id });
   res.json(cierre);
 });
 
