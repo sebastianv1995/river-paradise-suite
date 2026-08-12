@@ -56,6 +56,12 @@ Los datos se guardan en:
 Ese archivo contiene todas las ventas, cierres e historial.
 **Hacer una copia de ese archivo regularmente a un USB como respaldo.**
 
+Al descargar el proyecto por primera vez desde GitHub, el sistema crea
+`river_paradise.json` automÃ¡ticamente usando `river_paradise.seed.json`. La base
+inicial incluye el inventario confirmado de cafeterÃ­a y vinos, pero no contiene
+ventas, huÃ©spedes ni cierres privados. Después de creada, las actualizaciones del
+proyecto nunca reemplazan la base operativa.
+
 ---
 
 ## Flujo de trabajo diario

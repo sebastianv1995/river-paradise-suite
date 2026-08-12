@@ -11,6 +11,7 @@ const { promisify } = require('util');
 const app     = express();
 const PORT    = Number(process.env.PORT) || 3001;
 const DB_FILE = process.env.DB_FILE ? path.resolve(process.env.DB_FILE) : path.join(__dirname, 'river_paradise.json');
+const DB_SEED_FILE = path.join(__dirname, 'river_paradise.seed.json');
 const MENU_FILE = path.join(__dirname, '..', 'menu.json');
 const LOCATIONS = ['restaurante', 'cafeteria'];
 const EXCEL_PROTECTION_PASSWORD = process.env.EXCEL_PROTECTION_PASSWORD || crypto.randomBytes(24).toString('hex');
@@ -23,6 +24,11 @@ const RECEIPT_PRINT_SCRIPT = path.join(__dirname, 'print-receipt.ps1');
 // ── Base de datos JSON ────────────────────────────────────────
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
+    if (fs.existsSync(DB_SEED_FILE)) {
+      const seeded = JSON.parse(fs.readFileSync(DB_SEED_FILE, 'utf8'));
+      fs.writeFileSync(DB_FILE, JSON.stringify(seeded, null, 2));
+      return seeded;
+    }
     const initial = {
       mesas:   Array.from({ length: 12 }, (_, i) => ({ id: i+1, status: 'libre', openedAt: null, items: [] })),
       ventas:  [],
