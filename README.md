@@ -161,6 +161,11 @@ se registra la primera entrada y las entregas posteriores.
 
 ## Impresión de comandas y comprobantes
 
+Las comandas enviadas a cocina y los comprobantes impresos automáticamente al
+cobrar o cerrar una mesa salen en **dos copias consecutivas**. Las reimpresiones
+enviadas desde Ventas también producen dos copias. En la vista previa del navegador,
+la cantidad de copias se elige manualmente en el diálogo de impresión.
+
 - En una mesa ocupada, usar **Imprimir comanda de cocina** para imprimir el pedido
   actual en papel térmico (recomendado: 80 mm) o en una impresora normal.
 - **Enviar comanda a cocina** manda el pedido desde cualquier teléfono o tablet al

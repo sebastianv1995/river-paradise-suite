@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$TicketPath,
-  [Parameter(Mandatory = $true)][string]$PrinterName
+  [Parameter(Mandatory = $true)][string]$PrinterName,
+  [ValidateRange(1, 5)][int]$Copies = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,4 +53,6 @@ $document.add_PrintPage({
     $eventArgs.HasMorePages=$false
   }finally{$title.Dispose();$bold.Dispose();$body.Dispose();$small.Dispose();$totalFont.Dispose();$center.Dispose();$rightAlign.Dispose();$pen.Dispose()}
 })
-try{$document.Print()}finally{$document.Dispose()}
+try{
+  for($copy=1;$copy -le $Copies;$copy++){$document.Print()}
+}finally{$document.Dispose()}
