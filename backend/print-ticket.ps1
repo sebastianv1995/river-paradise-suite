@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$TicketPath,
   [Parameter(Mandatory = $true)][string]$PrinterName,
-  [ValidateRange(1, 5)][int]$Copies = 2
+  [ValidateRange(1, 5)][int]$Copies = 1
 )
 
 $ErrorActionPreference = 'Stop'
