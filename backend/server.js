@@ -562,26 +562,15 @@ app.post('/api/mesas/:id/print-kitchen', async (req, res) => {
   if (!mesa) return;
   if (mesa.status === 'libre' || !mesa.items.length) return res.status(409).json({ error:'La mesa no tiene una comanda para imprimir' });
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ mesa:mesa.id, openedAt:mesa.openedAt, items:mesa.items })).digest('hex');
-  const recent = [...db.print_jobs].reverse().find(job => job.fingerprint === fingerprint && job.status === 'printed' && Date.now() - new Date(job.created_at).getTime() < 10000);
+  const recent = [...db.print_jobs].reverse().find(job => job.fingerprint === fingerprint &&
+    ['pending','processing','printed'].includes(job.status) && Date.now() - new Date(job.created_at).getTime() < 10000);
   if (recent && req.body.force !== true) return res.json({ ok:true, duplicate:true, job:recent });
   const job = { id:db._nextPrintJobId++, type:'kitchen', mesa_id:mesa.id, mesa_numero:mesa.number,
-    location_id:mesa.location_id, printer:KITCHEN_PRINTER, fingerprint, status:'pending',
+    location_id:mesa.location_id, fingerprint, status:'pending', ticket:kitchenTicketData(mesa), copies:1,
     items:mesa.items.map(item => ({ item_id:item.item_id, name:item.name, qty:item.qty })), created_at:new Date().toISOString() };
   db.print_jobs.push(job); saveDB(db);
-  try {
-    await printKitchenTicket(mesa);
-    db = loadDB();
-    const savedJob = db.print_jobs.find(item => item.id === job.id);
-    if (savedJob) { savedJob.status = 'printed'; savedJob.printed_at = new Date().toISOString(); }
-    saveDB(db);
-    res.json({ ok:true, job:savedJob || job });
-  } catch (error) {
-    db = loadDB();
-    const savedJob = db.print_jobs.find(item => item.id === job.id);
-    if (savedJob) { savedJob.status = 'error'; savedJob.error = String(error.stderr || error.message || error).slice(0, 500); }
-    saveDB(db);
-    res.status(500).json({ error:`No se pudo imprimir en ${KITCHEN_PRINTER}. Verifica que esté encendida, conectada y con papel.` });
-  }
+  broadcastLive({ type:'print-job', location_id:mesa.location_id });
+  res.json({ ok:true, queued:true, job });
 });
 
 app.post('/api/mesas/:id/open', (req, res) => {
@@ -771,18 +760,16 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
   broadcastMesaChange(mesa);
   if (createdSale) broadcastLive({ type:'sales', location_id:createdSale.location_id });
   if (inventoryChanged) broadcastLive({ type:'inventory' });
-  let receiptPrinted = false;
   let receiptError = '';
   if (createdSale) {
-    try { await printCustomerReceipt(createdSale); receiptPrinted = true; }
-    catch (error) { receiptError = `No se pudo imprimir en ${KITCHEN_PRINTER}. La venta sí quedó guardada.`; }
     const latest = loadDB();
     latest.print_jobs.push({ id:latest._nextPrintJobId++, type:'receipt', sale_id:createdSale.id,
-      location_id:createdSale.location_id, printer:KITCHEN_PRINTER, status:receiptPrinted ? 'printed' : 'error',
-      error:receiptError, created_at:new Date().toISOString(), printed_at:receiptPrinted ? new Date().toISOString() : null });
+      location_id:createdSale.location_id, status:'pending', ticket:receiptTicketData(createdSale), copies:2,
+      created_at:new Date().toISOString() });
     saveDB(latest);
+    broadcastLive({ type:'print-job', location_id:createdSale.location_id });
   }
-  res.json({ ok:true, sale:createdSale, receipt_printed:receiptPrinted, receipt_error:receiptError });
+  res.json({ ok:true, sale:createdSale, receipt_printed:false, receipt_queued:Boolean(createdSale), receipt_error:receiptError });
 });
 
 // ── VENTAS ────────────────────────────────────────────────────
@@ -794,24 +781,38 @@ app.get('/api/ventas', (req, res) => {
   res.json(db.ventas.filter(v => v.fecha === fecha && (!location || v.location_id === location)).reverse());
 });
 
-app.post('/api/ventas/:id/print-receipt', async (req, res) => {
-  let db = loadDB();
+app.post('/api/ventas/:id/print-receipt', (req, res) => {
+  const db = loadDB();
   const sale = db.ventas.find(item => item.id === Number(req.params.id));
   if (!sale) return res.status(404).json({ error:'Venta no encontrada' });
-  try {
-    await printCustomerReceipt(sale);
-    db = loadDB();
-    db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', sale_id:sale.id, location_id:sale.location_id,
-      printer:KITCHEN_PRINTER, status:'printed', created_at:new Date().toISOString(), printed_at:new Date().toISOString() });
-    saveDB(db);
-    res.json({ ok:true });
-  } catch (error) {
-    db = loadDB();
-    db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', sale_id:sale.id, location_id:sale.location_id,
-      printer:KITCHEN_PRINTER, status:'error', error:String(error.stderr || error.message || error).slice(0,500), created_at:new Date().toISOString() });
-    saveDB(db);
-    res.status(500).json({ error:`No se pudo imprimir en ${KITCHEN_PRINTER}. Verifica que esté encendida, conectada y con papel.` });
-  }
+  const job = { id:db._nextPrintJobId++, type:'receipt', sale_id:sale.id, location_id:sale.location_id,
+    status:'pending', ticket:receiptTicketData(sale), copies:2, created_at:new Date().toISOString() };
+  db.print_jobs.push(job); saveDB(db);
+  broadcastLive({ type:'print-job', location_id:sale.location_id });
+  res.json({ ok:true, queued:true, job_id:job.id });
+});
+
+app.post('/api/print-jobs/claim', (req, res) => {
+  const location = validLocation(req.body.location_id);
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  const db = loadDB();
+  const now = Date.now();
+  for (const item of db.print_jobs) if (item.status === 'processing' && now - new Date(item.claimed_at || 0).getTime() > 120000) item.status = 'pending';
+  const job = db.print_jobs.find(item => item.location_id === location && item.ticket && ['pending','error'].includes(item.status));
+  if (!job) { saveDB(db); return res.status(204).end(); }
+  job.status = 'processing'; job.claimed_at = new Date().toISOString(); job.agent = String(req.body.agent || '').slice(0,100);
+  saveDB(db); res.json(job);
+});
+
+app.post('/api/print-jobs/:id/complete', (req, res) => {
+  const db = loadDB();
+  const job = db.print_jobs.find(item => item.id === Number(req.params.id));
+  if (!job) return res.status(404).json({ error:'Trabajo no encontrado' });
+  const ok = req.body.ok === true;
+  job.status = ok ? 'printed' : 'error'; job.error = ok ? '' : String(req.body.error || 'Error de impresión').slice(0,500);
+  job.attempts = Number(job.attempts || 0) + 1;
+  if (ok) job.printed_at = new Date().toISOString();
+  saveDB(db); res.json({ ok:true });
 });
 
 // ── REPORTES GENERALES ────────────────────────────────────────

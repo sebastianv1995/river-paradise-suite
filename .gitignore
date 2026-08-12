@@ -10,6 +10,8 @@ backend/river_paradise.json.tmp
 .env
 .env.*
 *.log
+impresion/config.json
+respaldos/
 npm-debug.log*
 
 # Editor and operating system files

@@ -191,6 +191,22 @@ del cliente.
 
 ---
 
+## Instalación final del servidor y las impresoras
+
+En la computadora principal, ejecutar `instalar.bat` y luego hacer clic derecho
+sobre `configurar_servidor.bat` → **Ejecutar como administrador**. Esto desactiva
+la suspensión cuando está conectada, inicia River Paradise al entrar a Windows y
+crea un respaldo diario a las 23:30. Se conservan los últimos 30 respaldos en
+`respaldos`. La IP debe reservarse una sola vez desde el router para que los
+teléfonos y tablets mantengan siempre el mismo acceso directo.
+
+En la computadora de cada local, copiar el proyecto y ejecutar
+`impresion\configurar_agente.bat`. El asistente muestra las impresoras de Windows
+y solicita: local (`restaurante` o `cafeteria`), dirección del servidor y nombre
+exacto de la impresora. Cada agente recoge solamente sus trabajos. Las comandas
+salen una vez y los comprobantes dos veces. Si la computadora o impresora no está
+disponible, el trabajo queda en la cola central para reintentarse.
+
 ## Checklist de pruebas
 
   [ ] Abrir mesa → agregar ítems → cobrar → confirmar pago
