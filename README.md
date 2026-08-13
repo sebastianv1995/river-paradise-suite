@@ -213,6 +213,8 @@ y solicita: local (`restaurante` o `cafeteria`), dirección del servidor y nombr
 exacto de la impresora. Cada agente recoge solamente sus trabajos. Las comandas
 salen una vez y los comprobantes dos veces. Si la computadora o impresora no está
 disponible, el trabajo queda en la cola central para reintentarse.
+El agente consulta la cola cuatro veces por segundo para que las comandas lleguen
+a la impresora prácticamente de inmediato dentro de la red local.
 
 ## Checklist de pruebas
 

@@ -4,12 +4,14 @@ $config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom
 $root = Split-Path -Parent $PSScriptRoot
 Write-Host "Agente $($config.location) conectado a $($config.server_url)"
 while ($true) {
+  $delayMilliseconds = 250
   try {
     $body = @{ location_id=$config.location; agent=$env:COMPUTERNAME } | ConvertTo-Json
     $uri = "$($config.server_url.TrimEnd('/'))/api/print-jobs/claim"
     try { $job = Invoke-RestMethod -Method Post -Uri $uri -ContentType 'application/json' -Body $body -TimeoutSec 10 }
     catch { if ($_.Exception.Response.StatusCode.value__ -eq 204) { $job=$null } else { throw } }
     if ($job) {
+      $delayMilliseconds = 25
       $ticketPath = Join-Path $env:TEMP "river-print-$($job.id).json"
       $job.ticket | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ticketPath -Encoding UTF8
       try {
@@ -20,6 +22,9 @@ while ($true) {
       Remove-Item -LiteralPath $ticketPath -Force -ErrorAction SilentlyContinue
       Invoke-RestMethod -Method Post -Uri "$($config.server_url.TrimEnd('/'))/api/print-jobs/$($job.id)/complete" -ContentType 'application/json' -Body $result -TimeoutSec 10 | Out-Null
     }
-  } catch { Write-Warning "Esperando conexión: $($_.Exception.Message)" }
-  Start-Sleep -Seconds 3
+  } catch {
+    Write-Warning "Esperando conexión: $($_.Exception.Message)"
+    $delayMilliseconds = 2000
+  }
+  Start-Sleep -Milliseconds $delayMilliseconds
 }
