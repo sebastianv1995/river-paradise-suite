@@ -166,6 +166,11 @@ impresos automáticamente al cobrar o cerrar una mesa salen en **dos copias
 consecutivas**, al igual que las reimpresiones enviadas desde Ventas. En la vista
 previa del navegador, la cantidad se elige manualmente en el diálogo de impresión.
 
+Al realizar el cierre diario de caja también se imprimen dos copias de un resumen
+térmico. Contiene únicamente fecha, hora, número de ventas, fondo inicial, totales
+por forma de pago, cuentas, caja chica y total en caja. Puede reimprimirse desde el
+historial de cierres.
+
 - En una mesa ocupada, usar **Imprimir comanda de cocina** para imprimir el pedido
   actual en papel térmico (recomendado: 80 mm) o en una impresora normal.
 - **Enviar comanda a cocina** manda el pedido desde cualquier teléfono o tablet al

@@ -205,6 +205,27 @@ function receiptTicketData(sale) {
   };
 }
 
+function closingTicketData(closing) {
+  return {
+    title:'CIERRE DE CAJA',
+    location:closing.location_id === 'cafeteria' ? 'Cafetería' : 'Restaurante',
+    date:closing.fecha, time:closing.hora,
+    rows:[
+      { label:'Número de ventas', value:String(closing.num_ventas || 0) },
+      { label:'Fondo inicial', value:`$${Number(closing.fondo_inicial || 0).toFixed(2)}` },
+      { label:'Total ventas', value:`$${Number(closing.total_ventas || 0).toFixed(2)}` },
+      { label:'Efectivo', value:`$${Number(closing.total_efectivo || 0).toFixed(2)}` },
+      { label:'Tarjeta', value:`$${Number(closing.total_tarjeta || 0).toFixed(2)}` },
+      { label:'Transferencia', value:`$${Number(closing.total_transferencia || 0).toFixed(2)}` },
+      { label:'Cargado a cuentas', value:`$${Number(closing.total_cuentas || 0).toFixed(2)}` },
+      { label:'Cobros de cuentas', value:`$${Number(closing.total_cobros_cuentas || 0).toFixed(2)}` },
+      { label:'Ingresos de caja chica', value:`$${Number(closing.total_ingresos_caja || 0).toFixed(2)}` },
+      { label:'Egresos de caja chica', value:`$${Number(closing.total_egresos_caja || 0).toFixed(2)}` },
+    ],
+    total:`$${Number(closing.total_caja || 0).toFixed(2)}`,
+  };
+}
+
 async function printCustomerReceipt(sale) {
   const receiptPath = path.join(os.tmpdir(), `river-receipt-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`);
   await fs.promises.writeFile(receiptPath, JSON.stringify(receiptTicketData(sale)), 'utf8');
@@ -1119,6 +1140,18 @@ app.get('/api/cierres/:id', (req, res) => {
   res.json(cierre);
 });
 
+app.post('/api/cierres/:id/print', (req, res) => {
+  const db = loadDB();
+  const closing = db.cierres.find(item => item.id === Number(req.params.id));
+  if (!closing) return res.status(404).json({ error:'Cierre no encontrado' });
+  const job = { id:db._nextPrintJobId++, type:'closing', closing_id:closing.id,
+    location_id:closing.location_id || 'restaurante', status:'pending', ticket:closingTicketData(closing),
+    copies:2, created_at:new Date().toISOString() };
+  db.print_jobs.push(job); saveDB(db);
+  broadcastLive({ type:'print-job', location_id:job.location_id });
+  res.json({ ok:true, queued:true, job_id:job.id });
+});
+
 app.post('/api/cierres', (req, res) => {
   const db    = loadDB();
   const fecha = todayStr();
@@ -1168,8 +1201,11 @@ app.post('/api/cierres', (req, res) => {
   for (const account of db.cuentas) for (const payment of account.payments || []) {
     if (payment.fecha === fecha && payment.location_id === location && !payment.cierre_id) payment.cierre_id = cierre.id;
   }
+  db.print_jobs.push({ id:db._nextPrintJobId++, type:'closing', closing_id:cierre.id,
+    location_id:location, status:'pending', ticket:closingTicketData(cierre), copies:2, created_at:new Date().toISOString() });
   saveDB(db);
   broadcastLive({ type:'closing', location_id:location, closing_id:cierre.id });
+  broadcastLive({ type:'print-job', location_id:location });
   res.json(cierre);
 });
 

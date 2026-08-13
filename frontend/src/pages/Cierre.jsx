@@ -21,6 +21,13 @@ function CierreDetalle({ cierre, onClose }) {
   const top = Object.values(topMap).sort((a,b) => b.rev - a.rev).slice(0,5);
   const maxRev = top.length ? top[0].rev : 1;
 
+  async function printClosing() {
+    const response = await fetch(`/api/cierres/${cierre.id}/print`, { method:'POST' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return window.alert(result.error || 'No se pudo enviar el cierre a impresión');
+    window.alert('Cierre enviado a la impresora del local (2 copias).');
+  }
+
   return (
     <div className="modal-overlay" style={{
       position:'fixed', inset:0, background:'rgba(0,0,0,0.35)',
@@ -41,6 +48,7 @@ function CierreDetalle({ cierre, onClose }) {
             <div style={{ fontSize:12, color:'var(--text2)' }}>Cerrado a las {cierre.hora}</div>
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <button onClick={printClosing} style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--green)', background:'var(--green-light)', color:'var(--green)', fontSize:12, cursor:'pointer' }}>Imprimir 2 copias</button>
             <a href={`/api/export/cierre/${cierre.id}`} style={{
               padding:'6px 12px', borderRadius:8, border:`1px solid var(--border)`,
               fontSize:12, color:'var(--text2)', textDecoration:'none', fontWeight:500,
@@ -419,6 +427,11 @@ export default function Cierre({ location }) {
                           padding:'5px 10px', borderRadius:7, border:`1px solid var(--border)`,
                           background:'transparent', fontSize:12, cursor:'pointer', color:'var(--text2)',
                         }}>Ver detalle</button>
+                      <button onClick={async () => {
+                        const response = await fetch(`/api/cierres/${c.id}/print`, { method:'POST' });
+                        const result = await response.json().catch(() => ({}));
+                        window.alert(response.ok ? 'Cierre enviado a impresión (2 copias).' : (result.error || 'No se pudo imprimir'));
+                      }} style={{ padding:'5px 10px', borderRadius:7, border:'1px solid var(--green)', background:'var(--green-light)', color:'var(--green)', fontSize:12, cursor:'pointer' }}>Imprimir</button>
                       <a href={`/api/export/cierre/${c.id}`} style={{
                         padding:'5px 10px', borderRadius:7, border:`1px solid var(--border)`,
                         fontSize:12, color:'var(--text2)', textDecoration:'none',

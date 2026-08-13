@@ -13,7 +13,7 @@ while ($true) {
       $ticketPath = Join-Path $env:TEMP "river-print-$($job.id).json"
       $job.ticket | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ticketPath -Encoding UTF8
       try {
-        $script = if ($job.type -eq 'kitchen') { Join-Path $root 'backend\print-ticket.ps1' } else { Join-Path $root 'backend\print-receipt.ps1' }
+        $script = if ($job.type -eq 'kitchen') { Join-Path $root 'backend\print-ticket.ps1' } elseif ($job.type -eq 'closing') { Join-Path $root 'backend\print-closing.ps1' } else { Join-Path $root 'backend\print-receipt.ps1' }
         & $script -TicketPath $ticketPath -PrinterName $config.printer_name -Copies ([int]$job.copies)
         $result = @{ ok=$true } | ConvertTo-Json
       } catch { $result = @{ ok=$false; error=$_.Exception.Message } | ConvertTo-Json }
