@@ -129,7 +129,8 @@ function stockFor(db, itemId) {
 }
 
 function accountSummary(account, ventas = []) {
-  const charged = fmt((account.charges || []).reduce((sum, item) => sum + item.amount, 0));
+  const activeCharges = (account.charges || []).filter(item => item.status !== 'anulado');
+  const charged = fmt(activeCharges.reduce((sum, item) => sum + item.amount, 0));
   const paid = fmt((account.payments || []).reduce((sum, item) => sum + item.amount, 0));
   const internal = fmt((account.writeoffs || []).reduce((sum, item) => sum + item.amount, 0));
   const salesById = Object.fromEntries(ventas.map(sale => [sale.id, sale]));
@@ -530,6 +531,40 @@ app.post('/api/accounts/:id/payments', (req, res) => {
   res.json(accountSummary(account));
 });
 
+app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
+  const db = loadDB();
+  const account = db.cuentas.find(item => item.id === Number(req.params.id));
+  if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
+  const charge = (account.charges || []).find(item => item.id === Number(req.params.chargeId));
+  if (!charge) return res.status(404).json({ error:'Consumo no encontrado' });
+  if (charge.status === 'anulado') return res.status(409).json({ error:'Este consumo ya fue anulado' });
+  const reason = String(req.body.reason || '').trim();
+  if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para la anulación' });
+  const sale = db.ventas.find(item => item.id === charge.sale_id);
+  if (sale?.cierre_id) return res.status(409).json({ error:'No se puede anular porque este consumo pertenece a un cierre de caja ya realizado' });
+  const current = accountSummary(account, db.ventas);
+  if (current.balance + 0.0001 < charge.amount) {
+    return res.status(409).json({ error:'No se puede anular porque este consumo ya fue cubierto total o parcialmente por pagos o consumo interno' });
+  }
+  const location = charge.location_id || sale?.location_id || 'restaurante';
+  const stockSales = db.movimientos_stock.filter(item => item.venta_id === charge.sale_id && item.type === 'venta');
+  for (const movement of stockSales) db.movimientos_stock.push({
+    id:db._nextStockMovementId++, item_id:movement.item_id, type:'anulacion', quantity:-movement.quantity,
+    venta_id:charge.sale_id, location_id:location, date:new Date().toISOString(),
+    note:`Anulación cuenta ${account.name}: ${reason}`,
+  });
+  charge.status = 'anulado'; charge.cancel_reason = reason; charge.cancelled_at = new Date().toISOString();
+  if (sale) {
+    sale.status = 'anulada'; sale.cancel_reason = reason; sale.cancelled_at = charge.cancelled_at;
+    sale.collection_status = 'anulada';
+  }
+  saveDB(db);
+  broadcastLive({ type:'accounts', location_id:location });
+  broadcastLive({ type:'sales', location_id:location });
+  if (stockSales.length) broadcastLive({ type:'inventory' });
+  res.json(accountSummary(account, db.ventas));
+});
+
 app.post('/api/accounts/:id/internal', (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
@@ -778,7 +813,7 @@ app.get('/api/ventas', (req, res) => {
   const db    = loadDB();
   const fecha = req.query.fecha || todayStr();
   const location = validLocation(req.query.location);
-  res.json(db.ventas.filter(v => v.fecha === fecha && (!location || v.location_id === location)).reverse());
+  res.json(db.ventas.filter(v => v.status !== 'anulada' && v.fecha === fecha && (!location || v.location_id === location)).reverse());
 });
 
 app.post('/api/ventas/:id/print-receipt', (req, res) => {
@@ -826,7 +861,7 @@ function localDateToISO(value) {
 function buildReport(db, from, to, location=null) {
   const ventas = db.ventas.filter(v => {
     const date = localDateToISO(v.fecha);
-    return date >= from && date <= to && (!location || v.location_id === location);
+    return v.status !== 'anulada' && date >= from && date <= to && (!location || v.location_id === location);
   });
   const cashMovements = db.movimientos_caja.filter(m => {
     const date = localDateToISO(m.fecha);
@@ -999,7 +1034,7 @@ app.post('/api/cierres', (req, res) => {
   if (db.cierres.some(c => c.fecha === fecha && c.location_id === location)) {
     return res.status(409).json({ error: 'La caja de hoy ya fue cerrada' });
   }
-  const ventas = db.ventas.filter(v => v.fecha === fecha && v.location_id === location && !v.cierre_id);
+  const ventas = db.ventas.filter(v => v.status !== 'anulada' && v.fecha === fecha && v.location_id === location && !v.cierre_id);
   const cashMovements = db.movimientos_caja.filter(m => m.fecha === fecha && m.location_id === location && !m.cierre_id);
   const accountPayments = db.cuentas.flatMap(account => (account.payments || [])
     .filter(payment => payment.fecha === fecha && payment.location_id === location && !payment.cierre_id)
@@ -1157,7 +1192,7 @@ app.get('/api/export/ventas', async (req, res) => {
   const db     = loadDB();
   const fecha  = req.query.fecha || todayStr();
   const location = validLocation(req.query.location);
-  const ventas = db.ventas.filter(v => v.fecha === fecha && (!location || v.location_id === location));
+  const ventas = db.ventas.filter(v => v.status !== 'anulada' && v.fecha === fecha && (!location || v.location_id === location));
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Ventas');
@@ -1191,7 +1226,7 @@ app.get('/api/export/solicitudes-factura', async (req, res) => {
   const db = loadDB();
   const fecha = req.query.fecha || todayStr();
   const location = validLocation(req.query.location);
-  const requests = db.ventas.filter(sale => sale.fecha === fecha && sale.invoice_requested && (!location || sale.location_id === location));
+  const requests = db.ventas.filter(sale => sale.status !== 'anulada' && sale.fecha === fecha && sale.invoice_requested && (!location || sale.location_id === location));
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Solicitudes de factura');
   ws.columns = [

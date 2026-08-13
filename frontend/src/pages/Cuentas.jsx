@@ -28,7 +28,9 @@ export default function Cuentas({ location }) {
     const events = new EventSource('/api/events');
     events.onmessage = event => {
       try {
-        if (JSON.parse(event.data).type === 'menu') fetch('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
+        const update = JSON.parse(event.data);
+        if (update.type === 'menu') fetch('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
+        if (update.type === 'accounts') load().catch(console.error);
       } catch (error) { console.error('No se pudo actualizar la carta', error); }
     };
     const refreshMenu = () => fetch('/api/menu').then(response => response.json()).then(setMenu).catch(console.error);
@@ -101,6 +103,24 @@ export default function Cuentas({ location }) {
     finally { setSaving(false); }
   }
 
+  async function cancelCharge(charge) {
+    const reason = window.prompt(`Motivo para anular el consumo de ${money(charge.amount)}:`);
+    if (reason === null) return;
+    if (!reason.trim()) return setMessage('Error: escribe el motivo de la anulación');
+    if (!window.confirm('¿Anular este consumo? El saldo bajará y los productos controlados regresarán al inventario.')) return;
+    setSaving(true); setMessage('');
+    try {
+      const response = await fetch(`/api/accounts/${selected.id}/charges/${charge.id}/cancel`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ reason }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'No se pudo anular el consumo');
+      setMessage('✓ Consumo anulado; el inventario fue restituido');
+      await load(); setAmount(result.balance.toFixed(2));
+    } catch (error) { setMessage(`Error: ${error.message}`); }
+    finally { setSaving(false); }
+  }
+
   return <div className="page-container accounts-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
     <div className="accounts-header"><div><div style={{ fontSize:18, fontWeight:600 }}>Cuentas pendientes</div><div style={{ fontSize:12, color:'var(--text2)' }}>Huéspedes, propietarios y personas autorizadas.</div></div><div className="pending-total"><span>Total pendiente</span><strong>{money(pendingTotal)}</strong></div></div>
     {message && <div className={`account-message ${message.startsWith('Error') ? 'error' : ''}`}>{message}</div>}
@@ -162,9 +182,12 @@ export default function Cuentas({ location }) {
             <button className="internal-account" disabled={saving || !Number(amount) || !internalNote.trim()} onClick={convertInternal}>Convertir en consumo interno</button>
           </div>}
           <h3>Consumos</h3>
-          {[...(selected.charges || [])].reverse().map(charge => <div className="account-history-row" key={charge.id}><span><b>{charge.fecha}</b><small>{charge.hora}{charge.location_id ? ` · ${charge.location_id}` : ''}{charge.note ? ` · ${charge.note}` : ''}</small>
+          {[...(selected.charges || [])].reverse().map(charge => <div className="account-history-row" key={charge.id} style={charge.status === 'anulado' ? { opacity:.65, background:'var(--bg2)' } : undefined}><span><b>{charge.fecha}{charge.status === 'anulado' ? ' · ANULADO' : ''}</b><small>{charge.hora}{charge.location_id ? ` · ${charge.location_id}` : ''}{charge.note ? ` · ${charge.note}` : ''}</small>
             {!!charge.items?.length && <small style={{ color:'var(--text2)', marginTop:3 }}>{charge.items.map(item => `${item.qty} ${item.name}`).join(', ')}</small>}
-          </span><strong>{money(charge.amount)}</strong></div>)}
+            {charge.cancel_reason && <small style={{ color:'var(--coral)', marginTop:3 }}>Motivo: {charge.cancel_reason}</small>}
+          </span><div style={{ textAlign:'right' }}><strong style={charge.status === 'anulado' ? { textDecoration:'line-through' } : undefined}>{money(charge.amount)}</strong>
+            {charge.status !== 'anulado' && <button disabled={saving} onClick={() => cancelCharge(charge)} style={{ display:'block', marginTop:5, border:'1px solid var(--coral)', borderRadius:6, background:'#fff', color:'var(--coral)', padding:'3px 7px', fontSize:10, cursor:'pointer' }}>Anular consumo</button>}
+          </div></div>)}
           {!!selected.payments?.length && <><h3>Pagos</h3>{[...selected.payments].reverse().map(payment => <div className="account-history-row payment" key={payment.id}><span><b style={{ textTransform:'capitalize' }}>{payment.payment_method}</b><small>{payment.fecha} · {payment.hora}{payment.payment_reference ? ` · Comp. ${payment.payment_reference}` : ''}</small></span><strong>−{money(payment.amount)}</strong></div>)}</>}
         </>}
       </div>
