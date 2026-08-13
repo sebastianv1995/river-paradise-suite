@@ -103,20 +103,21 @@ export default function Cuentas({ location }) {
     finally { setSaving(false); }
   }
 
-  async function cancelCharge(charge) {
-    const reason = window.prompt(`Motivo para anular el consumo de ${money(charge.amount)}:`);
+  async function cancelAccount() {
+    const reason = window.prompt(`Motivo para anular toda la cuenta de ${selected.name}:`);
     if (reason === null) return;
     if (!reason.trim()) return setMessage('Error: escribe el motivo de la anulación');
-    if (!window.confirm('¿Anular este consumo? El saldo bajará y los productos controlados regresarán al inventario.')) return;
+    if (!window.confirm(`¿Anular TODOS los consumos pendientes de ${selected.name}? El saldo quedará en cero y el inventario será restituido.`)) return;
     setSaving(true); setMessage('');
     try {
-      const response = await fetch(`/api/accounts/${selected.id}/charges/${charge.id}/cancel`, {
+      const response = await fetch(`/api/accounts/${selected.id}/cancel`, {
         method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ reason }),
       });
-      const result = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const result = contentType.includes('application/json') ? await response.json() : { error:'El servidor necesita reiniciarse para aplicar esta función' };
       if (!response.ok) throw new Error(result.error || 'No se pudo anular el consumo');
-      setMessage('✓ Consumo anulado; el inventario fue restituido');
-      await load(); setAmount(result.balance.toFixed(2));
+      setMessage('✓ Cuenta completa anulada; el inventario fue restituido');
+      await load(); setSelectedId(null);
     } catch (error) { setMessage(`Error: ${error.message}`); }
     finally { setSaving(false); }
   }
@@ -153,6 +154,9 @@ export default function Cuentas({ location }) {
               Descargar estado de cuenta
             </a>
           </div>
+          {selected.balance > 0 && <button disabled={saving} onClick={cancelAccount} style={{ width:'100%', margin:'0 0 10px', border:'1px solid var(--coral)', borderRadius:8, background:'#fff', color:'var(--coral)', padding:'8px 12px', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+            Anular cuenta completa
+          </button>}
           {addingConsumption && <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:10, maxHeight:330, overflowY:'auto', marginBottom:12 }}>
             <div style={{ fontSize:12, color:'var(--text2)', marginBottom:8 }}>Selecciona los productos consumidos. Se cargarán a la habitación sin registrar un pago.</div>
             {Object.entries(menu).map(([category, products]) => <div key={category} style={{ marginBottom:10 }}>
@@ -186,7 +190,6 @@ export default function Cuentas({ location }) {
             {!!charge.items?.length && <small style={{ color:'var(--text2)', marginTop:3 }}>{charge.items.map(item => `${item.qty} ${item.name}`).join(', ')}</small>}
             {charge.cancel_reason && <small style={{ color:'var(--coral)', marginTop:3 }}>Motivo: {charge.cancel_reason}</small>}
           </span><div style={{ textAlign:'right' }}><strong style={charge.status === 'anulado' ? { textDecoration:'line-through' } : undefined}>{money(charge.amount)}</strong>
-            {charge.status !== 'anulado' && <button disabled={saving} onClick={() => cancelCharge(charge)} style={{ display:'block', marginTop:5, border:'1px solid var(--coral)', borderRadius:6, background:'#fff', color:'var(--coral)', padding:'3px 7px', fontSize:10, cursor:'pointer' }}>Anular consumo</button>}
           </div></div>)}
           {!!selected.payments?.length && <><h3>Pagos</h3>{[...selected.payments].reverse().map(payment => <div className="account-history-row payment" key={payment.id}><span><b style={{ textTransform:'capitalize' }}>{payment.payment_method}</b><small>{payment.fecha} · {payment.hora}{payment.payment_reference ? ` · Comp. ${payment.payment_reference}` : ''}</small></span><strong>−{money(payment.amount)}</strong></div>)}</>}
         </>}

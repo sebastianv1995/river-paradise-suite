@@ -565,6 +565,50 @@ app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
   res.json(accountSummary(account, db.ventas));
 });
 
+app.post('/api/accounts/:id/cancel', (req, res) => {
+  const db = loadDB();
+  const account = db.cuentas.find(item => item.id === Number(req.params.id));
+  if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
+  const reason = String(req.body.reason || '').trim();
+  if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para anular la cuenta' });
+  const activeCharges = (account.charges || []).filter(item => item.status !== 'anulado');
+  if (!activeCharges.length) return res.status(409).json({ error:'Esta cuenta no tiene consumos pendientes para anular' });
+  const paid = (account.payments || []).reduce((sum, item) => sum + item.amount, 0);
+  const internal = (account.writeoffs || []).reduce((sum, item) => sum + item.amount, 0);
+  if (paid > 0 || internal > 0) {
+    return res.status(409).json({ error:'No se puede anular toda la cuenta porque ya registra pagos o consumos internos' });
+  }
+  const restoredSales = new Set();
+  const locations = new Set();
+  for (const charge of activeCharges) {
+    const sale = db.ventas.find(item => item.id === charge.sale_id);
+    const location = charge.location_id || sale?.location_id || 'restaurante';
+    locations.add(location);
+    if (charge.sale_id && !restoredSales.has(charge.sale_id)) {
+      const movements = db.movimientos_stock.filter(item => item.venta_id === charge.sale_id && item.type === 'venta');
+      for (const movement of movements) db.movimientos_stock.push({
+        id:db._nextStockMovementId++, item_id:movement.item_id, type:'anulacion', quantity:-movement.quantity,
+        venta_id:charge.sale_id, location_id:location, date:new Date().toISOString(),
+        note:`Anulación total cuenta ${account.name}: ${reason}`,
+      });
+      restoredSales.add(charge.sale_id);
+    }
+    charge.status = 'anulado'; charge.cancel_reason = reason; charge.cancelled_at = new Date().toISOString();
+    if (sale) {
+      sale.status = 'anulada'; sale.cancel_reason = reason; sale.cancelled_at = charge.cancelled_at;
+      sale.collection_status = 'anulada';
+    }
+  }
+  account.status = 'anulada'; account.cancel_reason = reason; account.cancelled_at = new Date().toISOString();
+  saveDB(db);
+  for (const location of locations) {
+    broadcastLive({ type:'accounts', location_id:location });
+    broadcastLive({ type:'sales', location_id:location });
+  }
+  if (restoredSales.size) broadcastLive({ type:'inventory' });
+  res.json(accountSummary(account, db.ventas));
+});
+
 app.post('/api/accounts/:id/internal', (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
