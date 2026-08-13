@@ -1182,6 +1182,11 @@ app.post('/api/cierres', (req, res) => {
   const total_egresos_caja = fmt(cashMovements.filter(m => m.type === 'egreso').reduce((s, m) => s + m.amount, 0));
   const fondo        = fmt(fondoSolicitado);
   const total_caja   = fmt(fondo + total_efectivo + total_ingresos_caja - total_egresos_caja);
+  const inventario = Object.values(loadMenu()).flat().filter(item => item.track_stock).map(product => ({
+    item_id:product.id, producto:product.name, disponible:fmt(stockFor(db, product.id)),
+    minimo:Number(product.stock_min || 0),
+    estado:stockFor(db, product.id) <= Number(product.stock_min || 0) ? 'Stock bajo' : 'Normal',
+  })).sort((a, b) => a.producto.localeCompare(b.producto, 'es'));
 
   const cierre = {
     id:            db._nextCierreId++,
@@ -1194,6 +1199,7 @@ app.post('/api/cierres', (req, res) => {
     ventas:        [...ventas],
     movimientos_caja:[...cashMovements],
     pagos_cuentas:[...accountPayments],
+    inventario,
   };
   db.cierres.push(cierre);
   for (const venta of ventas) venta.cierre_id = cierre.id;
@@ -1313,6 +1319,29 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws5.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   for (const payment of cierre.pagos_cuentas || []) ws5.addRow({ ...payment, amount:payment.amount });
   ws5.getColumn('amount').numFmt = '$#,##0.00';
+
+  const ws6 = wb.addWorksheet('Inventario al cierre');
+  ws6.columns = [
+    { header:'Producto / insumo', key:'producto', width:38 },
+    { header:'Unidades disponibles', key:'disponible', width:20 },
+    { header:'Stock mínimo', key:'minimo', width:16 },
+    { header:'Estado', key:'estado', width:16 },
+  ];
+  ws6.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
+  ws6.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF235347' } };
+  if (cierre.inventario?.length) {
+    for (const item of cierre.inventario) {
+      const row = ws6.addRow(item);
+      if (item.estado === 'Stock bajo') {
+        row.font = { color:{ argb:'FFC0392B' }, bold:true };
+        row.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFFCE8E6' } };
+      }
+    }
+  } else {
+    ws6.addRow({ producto:'Este cierre es anterior a la función de fotografía de inventario.', estado:'No disponible' });
+  }
+  ws6.autoFilter = { from:'A1', to:'D1' };
+  ws6.views = [{ state:'frozen', ySplit:1 }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="cierre_${cierre.fecha.replace(/\//g,'-')}_${cierre.hora.replace(':','-')}.xlsx"`);

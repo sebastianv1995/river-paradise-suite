@@ -111,8 +111,10 @@ comprobante; no es necesario guardar una fotografía.
 - Ventas del día: pestaña Ventas → botón "Exportar Excel"
 - Cierre completo: pestaña Cierre → botón "⬇ Excel" en cada cierre del historial
 
-Cada Excel del cierre incluye cinco hojas: resumen financiero, detalle de ventas,
-top productos, movimientos de caja chica y cobros de cuentas pendientes.
+Cada Excel del cierre incluye seis hojas: resumen financiero, detalle de ventas,
+top productos, movimientos de caja chica, cobros de cuentas pendientes e
+**Inventario al cierre**. Esta última conserva las existencias compartidas exactas
+del momento del cierre, aunque el archivo se descargue días después.
 
 Los archivos Excel descargados se entregan con sus hojas protegidas para consulta:
 permiten observar y usar los filtros, pero bloquean la edición, eliminación e
