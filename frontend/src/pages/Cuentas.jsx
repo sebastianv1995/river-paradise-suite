@@ -122,6 +122,26 @@ export default function Cuentas({ location }) {
     finally { setSaving(false); }
   }
 
+  async function cancelItem(charge, item) {
+    const reason = window.prompt(`Motivo para quitar ${item.qty} × ${item.name}:`);
+    if (reason === null) return;
+    if (!reason.trim()) return setMessage('Error: escribe el motivo de la anulación');
+    if (!window.confirm(`¿Quitar ${item.name} completo de esta cuenta?`)) return;
+    setSaving(true); setMessage('');
+    try {
+      const response = await fetch(`/api/accounts/${selected.id}/charges/${charge.id}/items/${item.id}/cancel`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ reason }),
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const result = contentType.includes('application/json') ? await response.json() : { error:'El servidor necesita reiniciarse para aplicar esta función' };
+      if (!response.ok) throw new Error(result.error || 'No se pudo quitar el producto');
+      setMessage(`✓ ${item.name} fue anulado y su inventario restituido`);
+      await load();
+      if (result.balance === 0) setSelectedId(null); else setAmount(result.balance.toFixed(2));
+    } catch (error) { setMessage(`Error: ${error.message}`); }
+    finally { setSaving(false); }
+  }
+
   return <div className="page-container accounts-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
     <div className="accounts-header"><div><div style={{ fontSize:18, fontWeight:600 }}>Cuentas pendientes</div><div style={{ fontSize:12, color:'var(--text2)' }}>Huéspedes, propietarios y personas autorizadas.</div></div><div className="pending-total"><span>Total pendiente</span><strong>{money(pendingTotal)}</strong></div></div>
     {message && <div className={`account-message ${message.startsWith('Error') ? 'error' : ''}`}>{message}</div>}
@@ -187,7 +207,11 @@ export default function Cuentas({ location }) {
           </div>}
           <h3>Consumos</h3>
           {[...(selected.charges || [])].reverse().map(charge => <div className="account-history-row" key={charge.id} style={charge.status === 'anulado' ? { opacity:.65, background:'var(--bg2)' } : undefined}><span><b>{charge.fecha}{charge.status === 'anulado' ? ' · ANULADO' : ''}</b><small>{charge.hora}{charge.location_id ? ` · ${charge.location_id}` : ''}{charge.note ? ` · ${charge.note}` : ''}</small>
-            {!!charge.items?.length && <small style={{ color:'var(--text2)', marginTop:3 }}>{charge.items.map(item => `${item.qty} ${item.name}`).join(', ')}</small>}
+            {!!charge.items?.length && <span style={{ display:'grid', gap:4, marginTop:5 }}>{charge.items.map(item => <small key={item.id} style={{ display:'flex', alignItems:'center', gap:6, color:item.status === 'anulado' ? 'var(--text3)' : 'var(--text2)', textDecoration:item.status === 'anulado' ? 'line-through' : 'none' }}>
+              <span>{item.qty} {item.name} · {money(item.qty * item.price)}</span>
+              {charge.status !== 'anulado' && item.status !== 'anulado' && <button title="Quitar este producto" aria-label={`Quitar ${item.name}`} disabled={saving} onClick={() => cancelItem(charge, item)} style={{ width:20, height:20, padding:0, border:'1px solid var(--coral)', borderRadius:'50%', background:'#fff', color:'var(--coral)', fontWeight:700, cursor:'pointer' }}>×</button>}
+              {item.cancel_reason && <span style={{ color:'var(--coral)' }}>({item.cancel_reason})</span>}
+            </small>)}</span>}
             {charge.cancel_reason && <small style={{ color:'var(--coral)', marginTop:3 }}>Motivo: {charge.cancel_reason}</small>}
           </span><div style={{ textAlign:'right' }}><strong style={charge.status === 'anulado' ? { textDecoration:'line-through' } : undefined}>{money(charge.amount)}</strong>
           </div></div>)}

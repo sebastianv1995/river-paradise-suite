@@ -128,6 +128,20 @@ function stockFor(db, itemId) {
     .reduce((total, movement) => total + movement.quantity, 0);
 }
 
+function stockRequirementsForItems(catalog, items) {
+  const productsById = Object.fromEntries(catalog.map(item => [item.id, item]));
+  const tracked = new Set(catalog.filter(item => item.track_stock).map(item => item.id));
+  const requirements = {};
+  for (const item of items.filter(item => item.status !== 'anulado')) {
+    const product = productsById[item.item_id];
+    if (product?.stock_components?.length) {
+      for (const component of product.stock_components) requirements[component.item_id] =
+        (requirements[component.item_id] || 0) + component.quantity * item.qty;
+    } else if (tracked.has(item.item_id)) requirements[item.item_id] = (requirements[item.item_id] || 0) + item.qty;
+  }
+  return requirements;
+}
+
 function accountSummary(account, ventas = []) {
   const activeCharges = (account.charges || []).filter(item => item.status !== 'anulado');
   const charged = fmt(activeCharges.reduce((sum, item) => sum + item.amount, 0));
@@ -181,7 +195,7 @@ function receiptTicketData(sale) {
     location:sale.location_id === 'cafeteria' ? 'Cafetería' : 'Restaurante',
     reference:`Venta #${sale.id} · ${sale.source === 'cuenta' ? `Habitación ${sale.account_room || '-'}` : `Mesa ${sale.mesa_numero || sale.mesa_id}`}`,
     date:`${sale.fecha} ${sale.hora}`,
-    items:(sale.items || []).map(item => ({ quantity:item.qty, name:item.name, unit_price:item.price, subtotal:fmt(item.price * item.qty) })),
+    items:(sale.items || []).filter(item => item.status !== 'anulado').map(item => ({ quantity:item.qty, name:item.name, unit_price:item.price, subtotal:fmt(item.price * item.qty) })),
     total:sale.total,
     payment:sale.payment_method === 'cuenta' ? 'Cargado a cuenta' : sale.payment_method,
     payment_reference:sale.payment_reference || '',
@@ -565,6 +579,44 @@ app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
   res.json(accountSummary(account, db.ventas));
 });
 
+app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', (req, res) => {
+  const db = loadDB();
+  const account = db.cuentas.find(entry => entry.id === Number(req.params.id));
+  const charge = (account?.charges || []).find(entry => entry.id === Number(req.params.chargeId));
+  const item = (charge?.items || []).find(entry => entry.id === Number(req.params.itemId));
+  if (!account || !charge || !item) return res.status(404).json({ error:'Producto del consumo no encontrado' });
+  if (charge.status === 'anulado' || item.status === 'anulado') return res.status(409).json({ error:'Este producto ya fue anulado' });
+  const reason = String(req.body.reason || '').trim();
+  if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para la anulación' });
+  const subtotal = fmt(item.price * item.qty);
+  const current = accountSummary(account, db.ventas);
+  if (current.balance + 0.0001 < subtotal) return res.status(409).json({ error:'Este producto ya fue cubierto total o parcialmente por un pago o consumo interno' });
+  const sale = db.ventas.find(entry => entry.id === charge.sale_id);
+  const location = charge.location_id || sale?.location_id || 'restaurante';
+  const requirements = stockRequirementsForItems(Object.values(loadMenu()).flat(), [item]);
+  for (const [itemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
+    id:db._nextStockMovementId++, item_id:itemId, type:'anulacion', quantity,
+    venta_id:charge.sale_id, source_item_id:item.id, location_id:location, date:new Date().toISOString(),
+    note:`Anulación de ${item.name} en cuenta ${account.name}: ${reason}`,
+  });
+  const cancelledAt = new Date().toISOString();
+  item.status = 'anulado'; item.cancel_reason = reason; item.cancelled_at = cancelledAt;
+  charge.amount = fmt(charge.amount - subtotal);
+  if (!(charge.items || []).some(entry => entry.status !== 'anulado')) charge.status = 'anulado';
+  const saleItem = (sale?.items || []).find(entry => entry.id === item.id);
+  if (saleItem) { saleItem.status = 'anulado'; saleItem.cancel_reason = reason; saleItem.cancelled_at = cancelledAt; }
+  if (sale) {
+    sale.total = fmt(sale.total - subtotal);
+    if (!(sale.items || []).some(entry => entry.status !== 'anulado')) {
+      sale.status = 'anulada'; sale.collection_status = 'anulada';
+    }
+  }
+  saveDB(db);
+  broadcastLive({ type:'accounts', location_id:location }); broadcastLive({ type:'sales', location_id:location });
+  if (Object.keys(requirements).length) broadcastLive({ type:'inventory' });
+  res.json(accountSummary(account, db.ventas));
+});
+
 app.post('/api/accounts/:id/cancel', (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
@@ -579,15 +631,16 @@ app.post('/api/accounts/:id/cancel', (req, res) => {
     return res.status(409).json({ error:'No se puede anular toda la cuenta porque ya registra pagos o consumos internos' });
   }
   const restoredSales = new Set();
+  const catalog = Object.values(loadMenu()).flat();
   const locations = new Set();
   for (const charge of activeCharges) {
     const sale = db.ventas.find(item => item.id === charge.sale_id);
     const location = charge.location_id || sale?.location_id || 'restaurante';
     locations.add(location);
     if (charge.sale_id && !restoredSales.has(charge.sale_id)) {
-      const movements = db.movimientos_stock.filter(item => item.venta_id === charge.sale_id && item.type === 'venta');
-      for (const movement of movements) db.movimientos_stock.push({
-        id:db._nextStockMovementId++, item_id:movement.item_id, type:'anulacion', quantity:-movement.quantity,
+      const requirements = stockRequirementsForItems(catalog, charge.items || sale?.items || []);
+      for (const [itemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
+        id:db._nextStockMovementId++, item_id:itemId, type:'anulacion', quantity,
         venta_id:charge.sale_id, location_id:location, date:new Date().toISOString(),
         note:`Anulación total cuenta ${account.name}: ${reason}`,
       });
@@ -923,7 +976,7 @@ function buildReport(db, from, to, location=null) {
     day.total = fmt(day.total + sale.total);
     const method = sale.payment_method || 'efectivo';
     day[method] = fmt(day[method] + sale.total);
-    for (const item of sale.items || []) {
+    for (const item of (sale.items || []).filter(item => item.status !== 'anulado')) {
       const product = products[item.item_id] ||= { id:item.item_id, name:item.name, quantity:0, revenue:0 };
       product.quantity += item.qty;
       product.revenue = fmt(product.revenue + item.price * item.qty);
@@ -1174,7 +1227,7 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws2.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   cierre.ventas.forEach((v, i) => ws2.addRow({
     num: i+1, mesa:v.source === 'cuenta' ? `Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
-    items:    v.items.map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
+    items:    v.items.filter(it => it.status !== 'anulado').map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
     total:    v.total,
   }));
   ws2.getColumn('total').numFmt = '$#,##0.00';
@@ -1190,7 +1243,7 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws3.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   const topMap = {};
   for (const v of cierre.ventas)
-    for (const it of v.items) {
+    for (const it of v.items.filter(it => it.status !== 'anulado')) {
       if (!topMap[it.name]) topMap[it.name] = { name:it.name, qty:0, rev:0 };
       topMap[it.name].qty += it.qty;
       topMap[it.name].rev += it.price * it.qty;
@@ -1254,7 +1307,7 @@ app.get('/api/export/ventas', async (req, res) => {
   ws.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
   ventas.forEach((v, i) => ws.addRow({
     num: i+1, mesa:v.source === 'cuenta' ? `Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`, fecha: v.fecha, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
-    items:    v.items.map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
+    items:    v.items.filter(it => it.status !== 'anulado').map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
     total:    v.total,
   }));
 
