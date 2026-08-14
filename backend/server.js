@@ -635,6 +635,7 @@ app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', (req, res) 
   const current = accountSummary(account, db.ventas);
   if (current.balance + 0.0001 < subtotal) return res.status(409).json({ error:'Este producto ya fue cubierto total o parcialmente por un pago o consumo interno' });
   const sale = db.ventas.find(entry => entry.id === charge.sale_id);
+  if (sale?.cierre_id) return res.status(409).json({ error:'No se puede anular porque este producto pertenece a un cierre de caja ya realizado' });
   const location = charge.location_id || sale?.location_id || 'restaurante';
   const requirements = stockRequirementsForItems(Object.values(loadMenu()).flat(), [item]);
   for (const [itemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
@@ -673,6 +674,8 @@ app.post('/api/accounts/:id/cancel', (req, res) => {
   if (paid > 0 || internal > 0) {
     return res.status(409).json({ error:'No se puede anular toda la cuenta porque ya registra pagos o consumos internos' });
   }
+  const closedSale = activeCharges.map(charge => db.ventas.find(item => item.id === charge.sale_id)).find(sale => sale?.cierre_id);
+  if (closedSale) return res.status(409).json({ error:'No se puede anular toda la cuenta porque contiene consumos incluidos en un cierre de caja ya realizado' });
   const restoredSales = new Set();
   const catalog = Object.values(loadMenu()).flat();
   const locations = new Set();
