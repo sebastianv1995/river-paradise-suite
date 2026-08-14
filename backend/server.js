@@ -1006,7 +1006,16 @@ app.post('/api/print-jobs/claim', (req, res) => {
   const db = loadDB();
   const now = Date.now();
   for (const item of db.print_jobs) if (item.status === 'processing' && now - new Date(item.claimed_at || 0).getTime() > 120000) item.status = 'pending';
-  const job = db.print_jobs.find(item => item.location_id === location && item.ticket && ['pending','error'].includes(item.status));
+  // Una comanda vieja no debe salir al encender el agente al dia siguiente.
+  for (const item of db.print_jobs) {
+    if (item.type === 'kitchen' && item.status === 'pending' &&
+      now - new Date(item.created_at || 0).getTime() > 12 * 60 * 60 * 1000) {
+      item.status = 'expired';
+      item.error = 'Comanda vencida: no se imprimio para evitar entregar un pedido antiguo';
+    }
+  }
+  // Un trabajo con error queda registrado, pero no bloquea toda la cola.
+  const job = db.print_jobs.find(item => item.location_id === location && item.ticket && item.status === 'pending');
   if (!job) { saveDB(db); return res.status(204).end(); }
   job.status = 'processing'; job.claimed_at = new Date().toISOString(); job.agent = String(req.body.agent || '').slice(0,100);
   saveDB(db); res.json(job);
