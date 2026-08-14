@@ -92,7 +92,36 @@ function saveDB(db) {
 }
 
 function loadMenu() {
-  return JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
+  const menu = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
+  let changed = false;
+  const all = Object.values(menu).flat();
+  const byId = Object.fromEntries(all.map(item => [item.id, item]));
+  const directStock = ['p1','p4','p5','p6','p9','p8','p14'];
+  for (const id of directStock) if (byId[id] && !byId[id].track_stock) {
+    byId[id].track_stock = true; byId[id].stock_min = 2; changed = true;
+  }
+  const recipes = {
+    p7:[{ item_id:'inv_lomo_res', quantity:1 }],
+    p10:[{ item_id:'inv_lomo_cerdo', quantity:1 }],
+    p11:[{ item_id:'inv_pescado_ceviche', quantity:1 }],
+    p12:[{ item_id:'inv_camaron_porcion', quantity:1 }],
+    p13:[{ item_id:'inv_camaron_porcion', quantity:0.5 }, { item_id:'inv_pescado_ceviche', quantity:0.5 }],
+  };
+  for (const [id, components] of Object.entries(recipes)) if (byId[id] && !byId[id].stock_components) {
+    byId[id].stock_components = components; changed = true;
+  }
+  const inventoryOnly = [
+    { id:'inv_lomo_res', name:'Lomo de res', desc:'1 unidad por Lomo en salsa', stock_min:2 },
+    { id:'inv_lomo_cerdo', name:'Lomo de cerdo', desc:'1 unidad por Lomo fino de cerdo', stock_min:2 },
+    { id:'inv_camaron_porcion', name:'Camarón (porción)', desc:'1 por ceviche de camarón; 0,5 por ceviche mixto', stock_min:2 },
+    { id:'inv_pescado_ceviche', name:'Pescado para ceviche (porción)', desc:'1 por ceviche de pescado; 0,5 por ceviche mixto', stock_min:2 },
+  ];
+  menu['Insumos de inventario'] ||= [];
+  for (const product of inventoryOnly) if (!byId[product.id]) {
+    menu['Insumos de inventario'].push({ ...product, price:0, track_stock:true, inventory_only:true }); changed = true;
+  }
+  if (changed) fs.writeFileSync(MENU_FILE, JSON.stringify(menu, null, 2));
+  return menu;
 }
 
 function saveMenu(menu) {

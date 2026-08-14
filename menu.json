@@ -18,67 +18,95 @@
       "id": "p1",
       "name": "Tomahawk 350 gr",
       "desc": "Papas a la francesa, salteado de vegetales",
-      "price": 15
+      "price": 15,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p4",
       "name": "T-Bone 350 gr",
       "desc": "Papas a la francesa, salteado de vegetales",
-      "price": 12
+      "price": 12,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p5",
       "name": "Picaña 250 gr",
       "desc": "Papas a la francesa, salteado de vegetales",
-      "price": 14
+      "price": 14,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p6",
       "name": "Ribeye 300 gr",
       "desc": "Papas a la francesa, salteado de vegetales",
-      "price": 15
+      "price": 15,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p7",
       "name": "Lomo en salsa",
       "desc": "Salsa de tocino, champiñones, curry",
-      "price": 15
+      "price": 15,
+      "stock_components": [
+        { "item_id": "inv_lomo_res", "quantity": 1 }
+      ]
     },
     {
       "id": "p9",
       "name": "Bife de res 250 gr",
       "desc": "Cama de puré de papa, salsa de la casa",
-      "price": 15
+      "price": 15,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p10",
       "name": "Lomo fino de cerdo",
       "desc": "Medallones de cerdo en salsa de mora",
-      "price": 12
+      "price": 12,
+      "stock_components": [
+        { "item_id": "inv_lomo_cerdo", "quantity": 1 }
+      ]
     },
     {
       "id": "p8",
       "name": "Costillas",
       "desc": "Salsa BBQ, mostaza y miel, chimichurri",
-      "price": 10
+      "price": 10,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "p11",
       "name": "Ceviche de pescado",
       "desc": "Chifles, tostado",
-      "price": 8
+      "price": 8,
+      "stock_components": [
+        { "item_id": "inv_pescado_ceviche", "quantity": 1 }
+      ]
     },
     {
       "id": "p12",
       "name": "Ceviche de camarón",
       "desc": "Chifles, tostado",
-      "price": 8
+      "price": 8,
+      "stock_components": [
+        { "item_id": "inv_camaron_porcion", "quantity": 1 }
+      ]
     },
     {
       "id": "p13",
       "name": "Ceviche mixto",
       "desc": "Chifles, tostado",
-      "price": 10
+      "price": 10,
+      "stock_components": [
+        { "item_id": "inv_camaron_porcion", "quantity": 0.5 },
+        { "item_id": "inv_pescado_ceviche", "quantity": 0.5 }
+      ]
     },
     {
       "id": "a1",
@@ -90,7 +118,9 @@
       "id": "p14",
       "name": "Filete de pollo",
       "desc": "Con papas fritas, ensalada fría y salsa",
-      "price": 8
+      "price": 8,
+      "track_stock": true,
+      "stock_min": 2
     },
     {
       "id": "prod_msnodbwc_8brb",
@@ -371,6 +401,42 @@
     }
   ],
   "Insumos de inventario": [
+    {
+      "id": "inv_lomo_res",
+      "name": "Lomo de res",
+      "desc": "1 unidad por Lomo en salsa",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_lomo_cerdo",
+      "name": "Lomo de cerdo",
+      "desc": "1 unidad por Lomo fino de cerdo",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_camaron_porcion",
+      "name": "Camarón (porción)",
+      "desc": "1 porción por ceviche de camarón; 0,5 por ceviche mixto",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_pescado_ceviche",
+      "name": "Pescado para ceviche (porción)",
+      "desc": "1 porción por ceviche de pescado; 0,5 por ceviche mixto",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 2,
+      "inventory_only": true
+    },
     {
       "id": "inv_empanada_disco",
       "name": "Discos de empanada",
