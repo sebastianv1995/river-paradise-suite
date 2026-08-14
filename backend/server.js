@@ -226,6 +226,22 @@ function closingTicketData(closing) {
   };
 }
 
+function accountPaymentTicketData(account, payment, summary) {
+  const items = (account.charges || []).filter(charge => charge.status !== 'anulado')
+    .flatMap(charge => (charge.items || []).filter(item => item.status !== 'anulado'));
+  return {
+    title:'RIVER PARADISE', subtitle:'CIERRE DE CUENTA',
+    location:payment.location_id === 'cafeteria' ? 'Cafetería' : 'Restaurante',
+    reference:`Habitación ${account.room || '-'} · ${account.name}`,
+    date:`${payment.fecha} ${payment.hora}`,
+    items:items.map(item => ({ quantity:item.qty, name:item.name, unit_price:item.price, subtotal:fmt(item.price * item.qty) })),
+    total:summary.charged, payment:`Cuenta pagada · ${payment.payment_method}`,
+    payment_reference:payment.payment_reference || '', invoice_requested:false,
+    customer_name:account.name, customer_tax_id:'', customer_city:'',
+    account_total:summary.charged, account_balance:summary.balance,
+  };
+}
+
 async function printCustomerReceipt(sale) {
   const receiptPath = path.join(os.tmpdir(), `river-receipt-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`);
   await fs.promises.writeFile(receiptPath, JSON.stringify(receiptTicketData(sale)), 'utf8');
@@ -559,11 +575,17 @@ app.post('/api/accounts/:id/payments', (req, res) => {
   if (!Number.isFinite(amount) || amount <= 0 || amount > current.balance) return res.status(400).json({ error:`El pago debe estar entre $0.01 y $${current.balance.toFixed(2)}` });
   if (reference.length > 80) return res.status(400).json({ error:'El comprobante es demasiado largo' });
   account.payments ||= [];
-  account.payments.push({ id:db._nextAccountPaymentId++, amount, payment_method:method,
-    payment_reference:reference, fecha:todayStr(), hora:nowTime(), cierre_id:null, location_id:location });
+  const payment = { id:db._nextAccountPaymentId++, amount, payment_method:method,
+    payment_reference:reference, fecha:todayStr(), hora:nowTime(), cierre_id:null, location_id:location };
+  account.payments.push(payment);
+  const updated = accountSummary(account, db.ventas);
+  if (updated.balance === 0) db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', account_id:account.id,
+    location_id:location, status:'pending', ticket:accountPaymentTicketData(account, payment, updated), copies:2,
+    created_at:new Date().toISOString() });
   saveDB(db);
   broadcastLive({ type:'accounts', location_id:location });
-  res.json(accountSummary(account));
+  if (updated.balance === 0) broadcastLive({ type:'print-job', location_id:location });
+  res.json({ ...updated, receipt_queued:updated.balance === 0 });
 });
 
 app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
@@ -914,7 +936,7 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
   if (createdSale) broadcastLive({ type:'sales', location_id:createdSale.location_id });
   if (inventoryChanged) broadcastLive({ type:'inventory' });
   let receiptError = '';
-  if (createdSale) {
+  if (createdSale && createdSale.payment_method !== 'cuenta') {
     const latest = loadDB();
     latest.print_jobs.push({ id:latest._nextPrintJobId++, type:'receipt', sale_id:createdSale.id,
       location_id:createdSale.location_id, status:'pending', ticket:receiptTicketData(createdSale), copies:2,
@@ -922,7 +944,8 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
     saveDB(latest);
     broadcastLive({ type:'print-job', location_id:createdSale.location_id });
   }
-  res.json({ ok:true, sale:createdSale, receipt_printed:false, receipt_queued:Boolean(createdSale), receipt_error:receiptError });
+  res.json({ ok:true, sale:createdSale, receipt_printed:false,
+    receipt_queued:Boolean(createdSale && createdSale.payment_method !== 'cuenta'), receipt_error:receiptError });
 });
 
 // ── VENTAS ────────────────────────────────────────────────────

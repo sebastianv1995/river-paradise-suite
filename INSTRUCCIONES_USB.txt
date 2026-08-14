@@ -1,0 +1,17 @@
+RIVER PARADISE - PAQUETE ACTUALIZADO
+
+SERVIDOR DE CAFETERIA
+1. Cierre River Paradise.
+2. Desde la USB ejecute ACTUALIZAR_SERVIDOR_DESDE_USB.bat.
+3. El proceso conserva la base real, la Carta y config.json de la impresora.
+4. Ejecute C:\RiverParadise\iniciar.bat.
+5. Reinicie Windows para reiniciar tambien el agente de impresion.
+
+COMPUTADORA DE RESTAURANTE
+1. Copie toda esta carpeta a C:\RiverParadise.
+2. Ejecute C:\RiverParadise\instalar.bat.
+3. NO ejecute configurar_servidor.bat ni iniciar.bat.
+4. Abra en el navegador http://IP-DEL-SERVIDOR:5173.
+5. Instale la impresora en Windows.
+6. Ejecute C:\RiverParadise\impresion\configurar_agente.bat.
+7. Escriba restaurante, la direccion del servidor y el nombre exacto de impresora.

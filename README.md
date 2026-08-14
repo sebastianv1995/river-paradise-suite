@@ -137,6 +137,9 @@ inventario se descuenta, pero no ingresa dinero a caja. La pestaña **Cuentas**
 permite acumular consumos, registrar pagos totales o parciales y convertir un
 saldo en consumo interno dejando registrado el motivo. Los cobros posteriores
 se incluyen en el cierre y los reportes según su forma de pago.
+Al cargar un consumo a una habitación no se imprime como cobrado. La cuenta queda
+abierta para nuevos pedidos, incluso en días posteriores. El comprobante de cierre
+se imprime en dos copias únicamente cuando el saldo se paga por completo.
 
 Al abrir una cuenta pendiente se puede usar **Agregar consumo** para seleccionar
 nuevos productos sin registrar un pago. El consumo se suma a la estadía, conserva

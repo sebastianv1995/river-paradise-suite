@@ -80,7 +80,7 @@ export default function Cuentas({ location }) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'No se pudo registrar el pago');
-      setMessage('✓ Pago registrado correctamente'); await load();
+      setMessage(result.receipt_queued ? '✓ Cuenta cerrada y comprobante enviado a impresión' : '✓ Pago parcial registrado; la cuenta continúa abierta'); await load();
       if (result.balance === 0) setSelectedId(null); else setAmount(result.balance.toFixed(2));
     } catch (error) { setMessage(`Error: ${error.message}`); }
     finally { setSaving(false); }
