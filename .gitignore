@@ -9,6 +9,7 @@ backend/river_paradise.sqlite
 backend/river_paradise.sqlite-shm
 backend/river_paradise.sqlite-wal
 backend/river_paradise.pre-sqlite-backup.json
+menu.json
 
 # Local configuration and logs
 .env

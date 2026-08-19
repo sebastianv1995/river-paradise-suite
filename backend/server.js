@@ -20,6 +20,7 @@ const DB_SEED_FILE = path.join(__dirname, 'river_paradise.seed.json');
 const BACKUP_DIR = process.env.BACKUP_DIR ? path.resolve(process.env.BACKUP_DIR) : path.join(__dirname, 'backups');
 const BACKUP_RETENTION_DAYS = Math.max(30, Math.min(90, Number(process.env.BACKUP_RETENTION_DAYS) || 60));
 const MENU_FILE = path.join(__dirname, '..', 'menu.json');
+const MENU_SEED_FILE = path.join(__dirname, '..', 'menu.seed.json');
 const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
 const LOCATIONS = ['restaurante', 'cafeteria'];
 const EXCEL_PROTECTION_PASSWORD = process.env.EXCEL_PROTECTION_PASSWORD || crypto.randomBytes(24).toString('hex');
@@ -158,6 +159,10 @@ function saveDB(db) {
 }
 
 function loadMenu() {
+  if (!fs.existsSync(MENU_FILE)) {
+    if (!fs.existsSync(MENU_SEED_FILE)) throw new Error('No se encontró la plantilla inicial de la carta');
+    fs.copyFileSync(MENU_SEED_FILE, MENU_FILE);
+  }
   const menu = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
   let changed = false;
   const all = Object.values(menu).flat();
