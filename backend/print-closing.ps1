@@ -7,6 +7,8 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 $printer=Get-Printer -Name $PrinterName -ErrorAction Stop
 $ticket=Get-Content -LiteralPath $TicketPath -Raw -Encoding UTF8|ConvertFrom-Json
+$logoPath=Join-Path $PSScriptRoot '..\frontend\public\assets\river-paradise-logo.png'
+$logo=if(Test-Path -LiteralPath $logoPath){[System.Drawing.Image]::FromFile($logoPath)}else{$null}
 $document=New-Object System.Drawing.Printing.PrintDocument
 $document.PrinterSettings.PrinterName=$PrinterName
 $document.PrintController=New-Object System.Drawing.Printing.StandardPrintController
@@ -24,6 +26,12 @@ $document.add_PrintPage({
   $rightAlign=New-Object System.Drawing.StringFormat;$rightAlign.Alignment=[System.Drawing.StringAlignment]::Far
   $pen=New-Object System.Drawing.Pen([System.Drawing.Color]::Black,1);$pen.DashStyle=[System.Drawing.Drawing2D.DashStyle]::Dash
   try{
+    if($logo){
+      $logoWidth=[single][Math]::Min(145,$width)
+      $logoHeight=[single]($logoWidth*$logo.Height/$logo.Width)
+      $logoLeft=[single]($left+($width-$logoWidth)/2)
+      $g.DrawImage($logo,$logoLeft,$y,$logoWidth,$logoHeight);$y+=$logoHeight+7
+    }
     $g.DrawString([string]$ticket.title,$title,$black,([System.Drawing.RectangleF]::new($left,$y,$width,22)),$center);$y+=23
     $g.DrawString([string]$ticket.location,$bold,$black,([System.Drawing.RectangleF]::new($left,$y,$width,18)),$center);$y+=19
     $g.DrawString(("Cierre del "+[string]$ticket.date+" a las "+[string]$ticket.time),$body,$black,([System.Drawing.RectangleF]::new($left,$y,$width,18)),$center);$y+=22
@@ -39,4 +47,4 @@ $document.add_PrintPage({
     $eventArgs.HasMorePages=$false
   }finally{$title.Dispose();$bold.Dispose();$body.Dispose();$total.Dispose();$center.Dispose();$rightAlign.Dispose();$pen.Dispose()}
 })
-try{for($copy=1;$copy -le $Copies;$copy++){$document.Print()}}finally{$document.Dispose()}
+try{for($copy=1;$copy -le $Copies;$copy++){$document.Print()}}finally{$document.Dispose();if($logo){$logo.Dispose()}}

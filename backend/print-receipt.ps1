@@ -9,6 +9,8 @@ Add-Type -AssemblyName System.Drawing
 $printer = Get-Printer -Name $PrinterName -ErrorAction Stop
 if ($printer.PrinterStatus -notin @('Normal', 'Idle', 0, 3)) { throw "Impresora no disponible: $($printer.PrinterStatus)" }
 $ticket = Get-Content -LiteralPath $TicketPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$logoPath = Join-Path $PSScriptRoot '..\frontend\public\assets\river-paradise-logo.png'
+$logo = if (Test-Path -LiteralPath $logoPath) { [System.Drawing.Image]::FromFile($logoPath) } else { $null }
 $document = New-Object System.Drawing.Printing.PrintDocument
 $document.PrinterSettings.PrinterName = $PrinterName
 $document.PrintController = New-Object System.Drawing.Printing.StandardPrintController
@@ -25,6 +27,12 @@ $document.add_PrintPage({
   $rightAlign=New-Object System.Drawing.StringFormat; $rightAlign.Alignment=[System.Drawing.StringAlignment]::Far
   $pen=New-Object System.Drawing.Pen([System.Drawing.Color]::Black,1); $pen.DashStyle=[System.Drawing.Drawing2D.DashStyle]::Dash
   try {
+    if ($logo) {
+      $logoWidth=[single][Math]::Min(145,$width)
+      $logoHeight=[single]($logoWidth*$logo.Height/$logo.Width)
+      $logoLeft=[single]($left+($width-$logoWidth)/2)
+      $g.DrawImage($logo,$logoLeft,$y,$logoWidth,$logoHeight);$y+=$logoHeight+7
+    }
     $g.DrawString([string]$ticket.title,$title,$black,([System.Drawing.RectangleF]::new($left,$y,$width,23)),$center);$y+=23
     $g.DrawString([string]$ticket.location,$body,$black,([System.Drawing.RectangleF]::new($left,$y,$width,16)),$center);$y+=16
     $g.DrawString([string]$ticket.subtitle,$bold,$black,([System.Drawing.RectangleF]::new($left,$y,$width,18)),$center);$y+=22
@@ -55,4 +63,4 @@ $document.add_PrintPage({
 })
 try{
   for($copy=1;$copy -le $Copies;$copy++){$document.Print()}
-}finally{$document.Dispose()}
+}finally{$document.Dispose();if($logo){$logo.Dispose()}}
