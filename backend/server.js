@@ -5,14 +5,22 @@ const fs      = require('fs');
 const path    = require('path');
 const crypto  = require('crypto');
 const os      = require('os');
+const { DatabaseSync } = require('node:sqlite');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 
 const app     = express();
-const PORT    = Number(process.env.PORT) || 3001;
-const DB_FILE = process.env.DB_FILE ? path.resolve(process.env.DB_FILE) : path.join(__dirname, 'river_paradise.json');
+const PORT    = Number(process.env.PORT) || 8080;
+const HOST    = process.env.HOST || '0.0.0.0';
+const LEGACY_DB_FILE = process.env.DB_FILE ? path.resolve(process.env.DB_FILE) : path.join(__dirname, 'river_paradise.json');
+const SQLITE_DB_FILE = process.env.SQLITE_DB_PATH
+  ? path.resolve(process.env.SQLITE_DB_PATH)
+  : process.env.DB_FILE ? `${LEGACY_DB_FILE}.sqlite` : path.join(__dirname, 'river_paradise.sqlite');
 const DB_SEED_FILE = path.join(__dirname, 'river_paradise.seed.json');
+const BACKUP_DIR = process.env.BACKUP_DIR ? path.resolve(process.env.BACKUP_DIR) : path.join(__dirname, 'backups');
+const BACKUP_RETENTION_DAYS = Math.max(30, Math.min(90, Number(process.env.BACKUP_RETENTION_DAYS) || 60));
 const MENU_FILE = path.join(__dirname, '..', 'menu.json');
+const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
 const LOCATIONS = ['restaurante', 'cafeteria'];
 const EXCEL_PROTECTION_PASSWORD = process.env.EXCEL_PROTECTION_PASSWORD || crypto.randomBytes(24).toString('hex');
 const liveClients = new Set();
@@ -21,15 +29,9 @@ const KITCHEN_PRINTER = process.env.KITCHEN_PRINTER || 'SAT 22TUS';
 const PRINT_SCRIPT = path.join(__dirname, 'print-ticket.ps1');
 const RECEIPT_PRINT_SCRIPT = path.join(__dirname, 'print-receipt.ps1');
 
-// ── Base de datos JSON ────────────────────────────────────────
-function loadDB() {
-  if (!fs.existsSync(DB_FILE)) {
-    if (fs.existsSync(DB_SEED_FILE)) {
-      const seeded = JSON.parse(fs.readFileSync(DB_SEED_FILE, 'utf8'));
-      fs.writeFileSync(DB_FILE, JSON.stringify(seeded, null, 2));
-      return seeded;
-    }
-    const initial = {
+// ── Base de datos SQLite ──────────────────────────────────────
+function initialDB() {
+  return {
       mesas:   Array.from({ length: 12 }, (_, i) => ({ id: i+1, status: 'libre', openedAt: null, items: [] })),
       ventas:  [],
       cierres: [],
@@ -39,6 +41,7 @@ function loadDB() {
       _nextStockMovementId: 1,
       movimientos_caja: [],
       _nextCashMovementId: 1,
+      caja_chica_fondos: { restaurante: 200, cafeteria: 200 },
       cuentas: [],
       _nextAccountId: 1,
       _nextAccountChargeId: 1,
@@ -46,15 +49,23 @@ function loadDB() {
       _nextAccountWriteoffId: 1,
       print_jobs: [],
       _nextPrintJobId: 1,
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2));
-    return initial;
-  }
-  const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  };
+}
+
+function normalizeDB(db) {
+  db.mesas ||= [];
+  db.ventas ||= [];
+  db.cierres ||= [];
   db.movimientos_stock ||= [];
   db._nextStockMovementId ||= 1;
   db.movimientos_caja ||= [];
   db._nextCashMovementId ||= 1;
+  db.caja_chica_fondos ||= { restaurante: 200, cafeteria: 200 };
+  for (const location of LOCATIONS) {
+    if (!Number.isFinite(Number(db.caja_chica_fondos[location])) || Number(db.caja_chica_fondos[location]) < 0) {
+      db.caja_chica_fondos[location] = 200;
+    }
+  }
   db.cuentas ||= [];
   db._nextAccountId ||= 1;
   db._nextAccountChargeId ||= 1;
@@ -85,10 +96,65 @@ function loadDB() {
   return db;
 }
 
+fs.mkdirSync(path.dirname(SQLITE_DB_FILE), { recursive:true });
+const sqlite = new DatabaseSync(SQLITE_DB_FILE);
+sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+sqlite.exec(`CREATE TABLE IF NOT EXISTS app_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  data_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`);
+sqlite.exec(`CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('admin','cajero')),
+  password_hash TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);`);
+const selectState = sqlite.prepare('SELECT data_json FROM app_state WHERE id = 1');
+const insertState = sqlite.prepare('INSERT INTO app_state (id, data_json, updated_at) VALUES (1, ?, ?)');
+const updateState = sqlite.prepare('UPDATE app_state SET data_json = ?, updated_at = ? WHERE id = 1');
+
+function migrateInitialState() {
+  if (selectState.get()) return;
+  let source = initialDB();
+  if (fs.existsSync(LEGACY_DB_FILE)) {
+    source = JSON.parse(fs.readFileSync(LEGACY_DB_FILE, 'utf8'));
+    const backupFile = LEGACY_DB_FILE.replace(/\.json$/i, '') + '.pre-sqlite-backup.json';
+    if (!fs.existsSync(backupFile)) fs.copyFileSync(LEGACY_DB_FILE, backupFile);
+  } else if (fs.existsSync(DB_SEED_FILE)) {
+    source = JSON.parse(fs.readFileSync(DB_SEED_FILE, 'utf8'));
+  }
+  insertState.run(JSON.stringify(normalizeDB(source)), new Date().toISOString());
+}
+
+migrateInitialState();
+
+function loadDB() {
+  const row = selectState.get();
+  if (!row) throw new Error('No se encontró el estado principal en SQLite');
+  return normalizeDB(JSON.parse(row.data_json));
+}
+
 function saveDB(db) {
-  const tempFile = `${DB_FILE}.tmp`;
-  fs.writeFileSync(tempFile, JSON.stringify(db, null, 2));
-  fs.renameSync(tempFile, DB_FILE);
+  sqlite.exec('BEGIN IMMEDIATE');
+  try {
+    updateState.run(JSON.stringify(normalizeDB(db)), new Date().toISOString());
+    sqlite.exec('COMMIT');
+    maybeCreateDailyBackup(db);
+  } catch (error) {
+    sqlite.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function loadMenu() {
@@ -130,12 +196,206 @@ function saveMenu(menu) {
   fs.renameSync(tempFile, MENU_FILE);
 }
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  return `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`;
+}
+
+function verifyPassword(password, stored) {
+  const [salt, expectedHex] = String(stored || '').split(':');
+  if (!salt || !expectedHex) return false;
+  const actual = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(expectedHex, 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function seedAdmin() {
+  if (sqlite.prepare('SELECT COUNT(*) total FROM users').get().total) return;
+  const password = process.env.INITIAL_ADMIN_PASSWORD || 'RiverParadise2026!';
+  sqlite.prepare(`INSERT INTO users (username, display_name, role, password_hash, active, must_change_password, created_at)
+    VALUES (?, ?, 'admin', ?, 1, 1, ?)`).run('admin', 'Administrador', hashPassword(password), new Date().toISOString());
+}
+
+seedAdmin();
+
+function backupPayload(db = loadDB()) {
+  return { version:1, created_at:new Date().toISOString(), state:normalizeDB(db), menu:loadMenu() };
+}
+
+function cleanupBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return;
+  const cutoff = Date.now() - BACKUP_RETENTION_DAYS * 86400000;
+  for (const name of fs.readdirSync(BACKUP_DIR).filter(name => name.endsWith('.json'))) {
+    const file = path.join(BACKUP_DIR, name);
+    if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
+  }
+}
+
+function createBackup(kind, db = loadDB()) {
+  fs.mkdirSync(BACKUP_DIR, { recursive:true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `river-paradise-${kind}-${stamp}.json`;
+  const temp = path.join(BACKUP_DIR, `${filename}.tmp`);
+  fs.writeFileSync(temp, JSON.stringify(backupPayload(db), null, 2));
+  fs.renameSync(temp, path.join(BACKUP_DIR, filename));
+  cleanupBackups();
+  return filename;
+}
+
+function maybeCreateDailyBackup(db) {
+  const date = new Date().toISOString().slice(0, 10);
+  fs.mkdirSync(BACKUP_DIR, { recursive:true });
+  if (!fs.readdirSync(BACKUP_DIR).some(name => name.startsWith(`river-paradise-diario-${date}`))) createBackup('diario', db);
+}
+
+maybeCreateDailyBackup(loadDB());
+
 // ── Middleware ────────────────────────────────────────────────
 app.use(cors({ origin(origin, callback) {
-  const allowed = !origin || /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):5173$/.test(origin);
+  const allowed = !origin || /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(?::(?:5173|8080))?$/.test(origin);
   callback(allowed ? null : new Error('Origen no permitido'), allowed);
-} }));
+}, credentials:true }));
 app.use(express.json());
+
+function cookieValue(req, name) {
+  const match = String(req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : '';
+}
+
+function sessionUser(req) {
+  const token = cookieValue(req, 'river_session');
+  if (!token) return null;
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  return sqlite.prepare(`SELECT users.id, users.username, users.display_name, users.role, users.must_change_password
+    FROM sessions JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.active = 1`).get(tokenHash, new Date().toISOString()) || null;
+}
+
+function requireAuth(req, res, next) {
+  const remote = req.socket.remoteAddress || '';
+  if (req.path.startsWith('/print-jobs/') && (remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1')) return next();
+  const user = sessionUser(req);
+  if (!user) return res.status(401).json({ error:'Inicia sesión para continuar' });
+  req.user = user; next();
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error:'Esta acción requiere permisos de administrador' });
+  next();
+}
+
+app.post('/api/auth/login', (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  const user = sqlite.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE AND active = 1').get(username);
+  if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error:'Usuario o contraseña incorrectos' });
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expires = new Date(Date.now() + 12 * 3600000).toISOString();
+  sqlite.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(new Date().toISOString());
+  sqlite.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(tokenHash, user.id, expires, new Date().toISOString());
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `river_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure ? '; Secure' : ''}`);
+  res.json({ id:user.id, username:user.username, display_name:user.display_name, role:user.role, must_change_password:Boolean(user.must_change_password) });
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const token = cookieValue(req, 'river_session');
+  sqlite.prepare('DELETE FROM sessions WHERE token_hash = ?').run(crypto.createHash('sha256').update(token).digest('hex'));
+  res.setHeader('Set-Cookie', 'river_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+  res.json({ ok:true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => res.json({ ...req.user, must_change_password:Boolean(req.user.must_change_password) }));
+
+app.post('/api/auth/change-password', requireAuth, (req, res) => {
+  const current = String(req.body.current_password || '');
+  const password = String(req.body.new_password || '');
+  const user = sqlite.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!verifyPassword(current, user.password_hash)) return res.status(400).json({ error:'La contraseña actual no es correcta' });
+  if (password.length < 10) return res.status(400).json({ error:'La nueva contraseña debe tener al menos 10 caracteres' });
+  sqlite.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPassword(password), user.id);
+  res.json({ ok:true });
+});
+
+app.use('/api', requireAuth);
+
+app.get('/api/security/users', requireAdmin, (req, res) => {
+  res.json(sqlite.prepare('SELECT id, username, display_name, role, active, created_at FROM users ORDER BY id').all());
+});
+
+app.post('/api/security/users', requireAdmin, (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const displayName = String(req.body.display_name || '').trim();
+  const role = String(req.body.role || 'cajero');
+  const password = String(req.body.password || '');
+  if (!/^[A-Za-z0-9._-]{3,40}$/.test(username) || !displayName || !['admin','cajero'].includes(role) || password.length < 10) {
+    return res.status(400).json({ error:'Completa un usuario válido, nombre, rol y contraseña de al menos 10 caracteres' });
+  }
+  try {
+    const result = sqlite.prepare(`INSERT INTO users (username, display_name, role, password_hash, active, must_change_password, created_at)
+      VALUES (?, ?, ?, ?, 1, 1, ?)`).run(username, displayName, role, hashPassword(password), new Date().toISOString());
+    res.status(201).json({ id:Number(result.lastInsertRowid), username, display_name:displayName, role, active:1 });
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error:'Ese nombre de usuario ya existe' });
+    throw error;
+  }
+});
+
+app.put('/api/security/users/:id/active', requireAdmin, (req, res) => {
+  const id = Number(req.params.id); const active = req.body.active ? 1 : 0;
+  if (id === req.user.id && !active) return res.status(400).json({ error:'No puedes desactivar tu propia cuenta' });
+  sqlite.prepare('UPDATE users SET active = ? WHERE id = ?').run(active, id);
+  if (!active) sqlite.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  res.json({ ok:true });
+});
+
+app.delete('/api/security/users/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error:'Usuario no válido' });
+  if (id === req.user.id) return res.status(400).json({ error:'No puedes eliminar tu propia cuenta' });
+  const target = sqlite.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
+  if (!target) return res.status(404).json({ error:'El usuario ya no existe' });
+  sqlite.exec('BEGIN IMMEDIATE');
+  try {
+    sqlite.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    sqlite.prepare('DELETE FROM users WHERE id = ?').run(id);
+    sqlite.exec('COMMIT');
+    res.json({ ok:true });
+  } catch (error) {
+    sqlite.exec('ROLLBACK');
+    throw error;
+  }
+});
+
+app.get('/api/backups', requireAdmin, (req, res) => {
+  fs.mkdirSync(BACKUP_DIR, { recursive:true });
+  res.json(fs.readdirSync(BACKUP_DIR).filter(name => name.endsWith('.json')).map(name => {
+    const stat = fs.statSync(path.join(BACKUP_DIR, name));
+    return { name, size:stat.size, created_at:stat.mtime.toISOString() };
+  }).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+});
+
+app.post('/api/backups', requireAdmin, (req, res) => res.status(201).json({ name:createBackup('manual') }));
+
+app.get('/api/backups/export', requireAdmin, (req, res) => {
+  const filename = `river-paradise-export-${new Date().toISOString().slice(0, 10)}.json`;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(JSON.stringify(backupPayload(), null, 2));
+});
+
+app.post('/api/backups/:name/restore', requireAdmin, (req, res) => {
+  const name = path.basename(req.params.name);
+  const file = path.join(BACKUP_DIR, name);
+  if (!name.endsWith('.json') || !fs.existsSync(file)) return res.status(404).json({ error:'Respaldo no encontrado' });
+  createBackup('antes-restaurar');
+  const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!payload.state || !payload.menu) return res.status(400).json({ error:'El respaldo no tiene un formato válido' });
+  saveMenu(payload.menu); saveDB(payload.state);
+  broadcastLive({ type:'sales' }); broadcastLive({ type:'accounts' }); broadcastLive({ type:'inventory' });
+  res.json({ ok:true });
+});
 
 // ── Helpers ───────────────────────────────────────────────────
 const todayStr = () => new Date().toLocaleDateString('es-EC', { day:'2-digit', month:'2-digit', year:'numeric' });
@@ -180,7 +440,22 @@ function accountSummary(account, ventas = []) {
   const charges = (account.charges || []).map(charge => ({
     ...charge, items:charge.items || salesById[charge.sale_id]?.items || [],
   }));
-  return { ...account, charges, charged, paid, internal, balance:fmt(charged - paid - internal) };
+  const balance = fmt(Math.max(0, charged - paid - internal));
+  const status = account.status === 'anulada' ? 'anulada' : balance === 0 ? 'cerrada' : 'pendiente';
+  return { ...account, status, charges, charged, paid, internal, balance };
+}
+
+function closeResolvedAccount(account, db, resolution) {
+  const summary = accountSummary(account, db.ventas);
+  if (summary.balance !== 0) return summary;
+  account.status = 'cerrada';
+  account.closed_at ||= new Date().toISOString();
+  account.resolution = resolution;
+  for (const charge of (account.charges || []).filter(item => item.status !== 'anulado')) {
+    const sale = db.ventas.find(item => item.id === charge.sale_id);
+    if (sale) sale.collection_status = resolution;
+  }
+  return accountSummary(account, db.ventas);
 }
 
 function validLocation(value) {
@@ -247,7 +522,7 @@ function closingTicketData(closing) {
       { label:'Tarjeta', value:`$${Number(closing.total_tarjeta || 0).toFixed(2)}` },
       { label:'Transferencia', value:`$${Number(closing.total_transferencia || 0).toFixed(2)}` },
       { label:'Cargado a cuentas', value:`$${Number(closing.total_cuentas || 0).toFixed(2)}` },
-      { label:'Cobros de cuentas', value:`$${Number(closing.total_cobros_cuentas || 0).toFixed(2)}` },
+      { label:'Cobros de cuentas pendientes noche anterior', value:`$${Number(closing.total_cobros_cuentas || 0).toFixed(2)}` },
       { label:'Ingresos de caja chica', value:`$${Number(closing.total_ingresos_caja || 0).toFixed(2)}` },
       { label:'Egresos de caja chica', value:`$${Number(closing.total_egresos_caja || 0).toFixed(2)}` },
     ],
@@ -508,6 +783,27 @@ app.get('/api/cash-movements', (req, res) => {
   res.json(db.movimientos_caja.filter(m => m.fecha === fecha && m.location_id === location).reverse());
 });
 
+app.get('/api/cash-fund', (req, res) => {
+  const db = loadDB();
+  const location = validLocation(req.query.location);
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  res.json({ location_id:location, amount:fmt(Number(db.caja_chica_fondos[location] || 0)) });
+});
+
+app.put('/api/cash-fund', (req, res) => {
+  const db = loadDB();
+  const location = validLocation(req.body.location_id);
+  const amount = Number(req.body.amount);
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  if (!Number.isFinite(amount) || amount < 0 || amount > 99999.99) {
+    return res.status(400).json({ error:'El fondo fijo debe estar entre $0.00 y $99,999.99' });
+  }
+  db.caja_chica_fondos[location] = fmt(amount);
+  saveDB(db);
+  broadcastLive({ type:'cash', location_id:location });
+  res.json({ location_id:location, amount:db.caja_chica_fondos[location] });
+});
+
 app.post('/api/cash-movements', (req, res) => {
   const db = loadDB();
   const fecha = todayStr();
@@ -536,7 +832,11 @@ app.post('/api/cash-movements', (req, res) => {
 
 app.get('/api/accounts', (req, res) => {
   const db = loadDB();
-  res.json(db.cuentas.map(account => accountSummary(account, db.ventas)).sort((a, b) => b.id - a.id));
+  const accounts = db.cuentas.map(account => accountSummary(account, db.ventas));
+  const result = req.query.include_closed === '1'
+    ? accounts
+    : accounts.filter(account => account.status === 'pendiente' && account.balance > 0);
+  res.json(result.sort((a, b) => b.id - a.id));
 });
 
 app.post('/api/accounts/:id/charges', (req, res) => {
@@ -607,7 +907,7 @@ app.post('/api/accounts/:id/payments', (req, res) => {
   const payment = { id:db._nextAccountPaymentId++, amount, payment_method:method,
     payment_reference:reference, fecha:todayStr(), hora:nowTime(), cierre_id:null, location_id:location };
   account.payments.push(payment);
-  const updated = accountSummary(account, db.ventas);
+  const updated = closeResolvedAccount(account, db, 'pagada');
   if (updated.balance === 0) db.print_jobs.push({ id:db._nextPrintJobId++, type:'receipt', account_id:account.id,
     location_id:location, status:'pending', ticket:accountPaymentTicketData(account, payment, updated), copies:2,
     created_at:new Date().toISOString() });
@@ -617,7 +917,7 @@ app.post('/api/accounts/:id/payments', (req, res) => {
   res.json({ ...updated, receipt_queued:updated.balance === 0 });
 });
 
-app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
+app.post('/api/accounts/:id/charges/:chargeId/cancel', requireAdmin, (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
   if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
@@ -651,7 +951,7 @@ app.post('/api/accounts/:id/charges/:chargeId/cancel', (req, res) => {
   res.json(accountSummary(account, db.ventas));
 });
 
-app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', (req, res) => {
+app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', requireAdmin, (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(entry => entry.id === Number(req.params.id));
   const charge = (account?.charges || []).find(entry => entry.id === Number(req.params.chargeId));
@@ -660,24 +960,36 @@ app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', (req, res) 
   if (charge.status === 'anulado' || item.status === 'anulado') return res.status(409).json({ error:'Este producto ya fue anulado' });
   const reason = String(req.body.reason || '').trim();
   if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para la anulación' });
-  const subtotal = fmt(item.price * item.qty);
+  const requestedQty = req.body.quantity === undefined ? item.qty : Number(req.body.quantity);
+  if (!Number.isInteger(requestedQty) || requestedQty <= 0 || requestedQty > item.qty) {
+    return res.status(400).json({ error:'La cantidad que deseas retirar no es válida' });
+  }
+  const subtotal = fmt(item.price * requestedQty);
   const current = accountSummary(account, db.ventas);
   if (current.balance + 0.0001 < subtotal) return res.status(409).json({ error:'Este producto ya fue cubierto total o parcialmente por un pago o consumo interno' });
   const sale = db.ventas.find(entry => entry.id === charge.sale_id);
   if (sale?.cierre_id) return res.status(409).json({ error:'No se puede anular porque este producto pertenece a un cierre de caja ya realizado' });
   const location = charge.location_id || sale?.location_id || 'restaurante';
-  const requirements = stockRequirementsForItems(Object.values(loadMenu()).flat(), [item]);
+  const requirements = stockRequirementsForItems(Object.values(loadMenu()).flat(), [{ ...item, qty:requestedQty }]);
   for (const [itemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
     id:db._nextStockMovementId++, item_id:itemId, type:'anulacion', quantity,
     venta_id:charge.sale_id, source_item_id:item.id, location_id:location, date:new Date().toISOString(),
     note:`Anulación de ${item.name} en cuenta ${account.name}: ${reason}`,
   });
   const cancelledAt = new Date().toISOString();
-  item.status = 'anulado'; item.cancel_reason = reason; item.cancelled_at = cancelledAt;
+  item.qty -= requestedQty;
+  if (item.qty === 0) {
+    item.status = 'anulado'; item.cancel_reason = reason; item.cancelled_at = cancelledAt;
+  }
   charge.amount = fmt(charge.amount - subtotal);
   if (!(charge.items || []).some(entry => entry.status !== 'anulado')) charge.status = 'anulado';
   const saleItem = (sale?.items || []).find(entry => entry.id === item.id);
-  if (saleItem) { saleItem.status = 'anulado'; saleItem.cancel_reason = reason; saleItem.cancelled_at = cancelledAt; }
+  if (saleItem) {
+    saleItem.qty = item.qty;
+    if (saleItem.qty === 0) {
+      saleItem.status = 'anulado'; saleItem.cancel_reason = reason; saleItem.cancelled_at = cancelledAt;
+    }
+  }
   if (sale) {
     sale.total = fmt(sale.total - subtotal);
     if (!(sale.items || []).some(entry => entry.status !== 'anulado')) {
@@ -690,7 +1002,57 @@ app.post('/api/accounts/:id/charges/:chargeId/items/:itemId/cancel', (req, res) 
   res.json(accountSummary(account, db.ventas));
 });
 
-app.post('/api/accounts/:id/cancel', (req, res) => {
+app.post('/api/accounts/:id/items/:itemId/cancel', requireAdmin, (req, res) => {
+  const db = loadDB();
+  const account = db.cuentas.find(entry => entry.id === Number(req.params.id));
+  if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
+  const reason = String(req.body.reason || '').trim();
+  if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para la anulación' });
+  const entries = (account.charges || []).filter(charge => charge.status !== 'anulado').flatMap(charge =>
+    (charge.items || []).filter(item => item.status !== 'anulado' && item.item_id === req.params.itemId)
+      .map(item => ({ charge, item, sale:db.ventas.find(entry => entry.id === charge.sale_id) }))
+  );
+  if (!entries.length) return res.status(404).json({ error:'Este producto ya no está activo en la cuenta' });
+  const subtotal = fmt(entries.reduce((sum, entry) => sum + entry.item.price * entry.item.qty, 0));
+  const current = accountSummary(account, db.ventas);
+  if (current.balance + 0.0001 < subtotal) {
+    return res.status(409).json({ error:'Este producto ya fue cubierto total o parcialmente por un pago o consumo interno' });
+  }
+  const catalog = Object.values(loadMenu()).flat();
+  const cancelledAt = new Date().toISOString();
+  const locations = new Set();
+  for (const { charge, item, sale } of entries) {
+    const location = charge.location_id || sale?.location_id || 'restaurante';
+    locations.add(location);
+    const requirements = stockRequirementsForItems(catalog, [item]);
+    for (const [stockItemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
+      id:db._nextStockMovementId++, item_id:stockItemId, type:'anulacion', quantity,
+      venta_id:charge.sale_id, source_item_id:item.id, location_id:location, date:new Date().toISOString(),
+      note:`Anulación total de ${item.name} en cuenta ${account.name}: ${reason}`,
+    });
+    const itemSubtotal = fmt(item.price * item.qty);
+    item.status = 'anulado'; item.cancel_reason = reason; item.cancelled_at = cancelledAt;
+    charge.amount = fmt(charge.amount - itemSubtotal);
+    if (!(charge.items || []).some(entry => entry.status !== 'anulado')) charge.status = 'anulado';
+    const saleItem = (sale?.items || []).find(entry => entry.id === item.id);
+    if (saleItem) { saleItem.status = 'anulado'; saleItem.cancel_reason = reason; saleItem.cancelled_at = cancelledAt; }
+    if (sale) {
+      sale.total = fmt(sale.total - itemSubtotal);
+      if (!(sale.items || []).some(entry => entry.status !== 'anulado')) {
+        sale.status = 'anulada'; sale.collection_status = 'anulada';
+      }
+    }
+  }
+  saveDB(db);
+  for (const location of locations) {
+    broadcastLive({ type:'accounts', location_id:location });
+    broadcastLive({ type:'sales', location_id:location });
+  }
+  broadcastLive({ type:'inventory' });
+  res.json(accountSummary(account, db.ventas));
+});
+
+app.post('/api/accounts/:id/cancel', requireAdmin, (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
   if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
@@ -703,8 +1065,6 @@ app.post('/api/accounts/:id/cancel', (req, res) => {
   if (paid > 0 || internal > 0) {
     return res.status(409).json({ error:'No se puede anular toda la cuenta porque ya registra pagos o consumos internos' });
   }
-  const closedSale = activeCharges.map(charge => db.ventas.find(item => item.id === charge.sale_id)).find(sale => sale?.cierre_id);
-  if (closedSale) return res.status(409).json({ error:'No se puede anular toda la cuenta porque contiene consumos incluidos en un cierre de caja ya realizado' });
   const restoredSales = new Set();
   const catalog = Object.values(loadMenu()).flat();
   const locations = new Set();
@@ -741,7 +1101,7 @@ app.post('/api/accounts/:id/internal', (req, res) => {
   const db = loadDB();
   const account = db.cuentas.find(item => item.id === Number(req.params.id));
   if (!account) return res.status(404).json({ error:'Cuenta no encontrada' });
-  const current = accountSummary(account);
+  const current = accountSummary(account, db.ventas);
   const amount = fmt(Number(req.body.amount));
   const note = String(req.body.note || '').trim();
   const location = validLocation(req.body.location_id);
@@ -750,9 +1110,10 @@ app.post('/api/accounts/:id/internal', (req, res) => {
   if (!location) return res.status(400).json({ error:'Local no válido' });
   account.writeoffs ||= [];
   account.writeoffs.push({ id:db._nextAccountWriteoffId++, amount, note, fecha:todayStr(), hora:nowTime(), location_id:location });
+  const updated = closeResolvedAccount(account, db, 'interno');
   saveDB(db);
   broadcastLive({ type:'accounts', location_id:location });
-  res.json(accountSummary(account));
+  res.json(updated);
 });
 
 // ── MESAS ─────────────────────────────────────────────────────
@@ -944,6 +1305,9 @@ app.post('/api/mesas/:id/cerrar', async (req, res) => {
       customer_tax_id: customerTaxId,
       customer_city: customerCity,
       account_id: account?.id || null,
+      account_type: account?.type || null,
+      account_name: account?.name || null,
+      account_room: account?.room || '',
       collection_status: paymentMethod === 'cuenta' ? 'pendiente' : 'pagada',
       total,
       hora:  nowTime(),
@@ -998,6 +1362,34 @@ app.post('/api/ventas/:id/print-receipt', (req, res) => {
   db.print_jobs.push(job); saveDB(db);
   broadcastLive({ type:'print-job', location_id:sale.location_id });
   res.json({ ok:true, queued:true, job_id:job.id });
+});
+
+app.post('/api/ventas/:id/cancel', requireAdmin, (req, res) => {
+  const db = loadDB();
+  const sale = db.ventas.find(item => item.id === Number(req.params.id));
+  if (!sale) return res.status(404).json({ error:'Venta no encontrada' });
+  if (sale.status === 'anulada') return res.status(409).json({ error:'Esta venta ya fue anulada' });
+  if (sale.cierre_id) return res.status(409).json({ error:'No se puede anular una venta incluida en un cierre de caja' });
+  if (sale.payment_method === 'cuenta') return res.status(409).json({ error:'Los cargos pendientes se anulan desde el apartado Cuentas' });
+  const reason = String(req.body.reason || '').trim();
+  if (!reason || reason.length > 200) return res.status(400).json({ error:'Escribe un motivo válido para la anulación' });
+  const activeItems = (sale.items || []).filter(item => item.status !== 'anulado');
+  const requirements = stockRequirementsForItems(Object.values(loadMenu()).flat(), activeItems);
+  for (const [itemId, quantity] of Object.entries(requirements)) db.movimientos_stock.push({
+    id:db._nextStockMovementId++, item_id:itemId, type:'anulacion', quantity,
+    venta_id:sale.id, location_id:sale.location_id, date:new Date().toISOString(),
+    note:`Anulación venta #${sale.id}: ${reason}`,
+  });
+  sale.status = 'anulada';
+  sale.cancel_reason = reason;
+  sale.cancelled_at = new Date().toISOString();
+  sale.cancelled_fecha = todayStr();
+  sale.cancelled_hora = nowTime();
+  sale.cancel_cierre_id = null;
+  saveDB(db);
+  broadcastLive({ type:'sales', location_id:sale.location_id });
+  if (Object.keys(requirements).length) broadcastLive({ type:'inventory' });
+  res.json({ ok:true, sale });
 });
 
 app.post('/api/print-jobs/claim', (req, res) => {
@@ -1204,6 +1596,25 @@ app.get('/api/cierres/:id', (req, res) => {
   res.json(cierre);
 });
 
+app.delete('/api/cierres/:id', requireAdmin, (req, res) => {
+  const db = loadDB();
+  const id = Number(req.params.id);
+  const index = db.cierres.findIndex(item => item.id === id);
+  if (index === -1) return res.status(404).json({ error:'Cierre no encontrado' });
+  const [cierre] = db.cierres.splice(index, 1);
+  for (const sale of db.ventas) if (sale.cierre_id === id) sale.cierre_id = null;
+  for (const movement of db.movimientos_caja) if (movement.cierre_id === id) movement.cierre_id = null;
+  for (const account of db.cuentas) {
+    for (const payment of account.payments || []) if (payment.cierre_id === id) payment.cierre_id = null;
+  }
+  saveDB(db);
+  broadcastLive({ type:'closing', location_id:cierre.location_id });
+  broadcastLive({ type:'sales', location_id:cierre.location_id });
+  broadcastLive({ type:'cash', location_id:cierre.location_id });
+  broadcastLive({ type:'accounts', location_id:cierre.location_id });
+  res.json({ ok:true, deleted_id:id, fecha:cierre.fecha, location_id:cierre.location_id });
+});
+
 app.post('/api/cierres/:id/print', (req, res) => {
   const db = loadDB();
   const closing = db.cierres.find(item => item.id === Number(req.params.id));
@@ -1274,6 +1685,7 @@ app.post('/api/cierres', (req, res) => {
   db.print_jobs.push({ id:db._nextPrintJobId++, type:'closing', closing_id:cierre.id,
     location_id:location, status:'pending', ticket:closingTicketData(cierre), copies:2, created_at:new Date().toISOString() });
   saveDB(db);
+  createBackup('cierre', db);
   broadcastLive({ type:'closing', location_id:location, closing_id:cierre.id });
   broadcastLive({ type:'print-job', location_id:location });
   res.json(cierre);
@@ -1288,6 +1700,7 @@ app.get('/api/export/cierre/:id', async (req, res) => {
 
   const wb  = new ExcelJS.Workbook();
   wb.creator = 'River Paradise';
+  const accountById = Object.fromEntries(db.cuentas.map(account => [account.id, account]));
 
   // Hoja 1 — Resumen
   const ws1 = wb.addWorksheet('Resumen');
@@ -1311,7 +1724,7 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws1.addRow(['Pagos con tarjeta', `$${(cierre.total_tarjeta ?? 0).toFixed(2)}`]);
   ws1.addRow(['Transferencias',    `$${(cierre.total_transferencia ?? 0).toFixed(2)}`]);
   ws1.addRow(['Cargado a cuentas', `$${(cierre.total_cuentas ?? 0).toFixed(2)}`]);
-  ws1.addRow(['Cobros de cuentas pendientes', `$${(cierre.total_cobros_cuentas ?? 0).toFixed(2)}`]);
+  ws1.addRow(['Cobros de cuentas pendientes noche anterior', `$${(cierre.total_cobros_cuentas ?? 0).toFixed(2)}`]);
   ws1.addRow(['Ingresos caja chica', `$${(cierre.total_ingresos_caja ?? 0).toFixed(2)}`]);
   ws1.addRow(['Egresos caja chica', `$${(cierre.total_egresos_caja ?? 0).toFixed(2)}`]);
   const tot = ws1.addRow(['TOTAL EN CAJA', `$${cierre.total_caja.toFixed(2)}`]);
@@ -1325,17 +1738,31 @@ app.get('/api/export/cierre/:id', async (req, res) => {
     { header:'Mesa',     key:'mesa',     width:8  },
     { header:'Hora',     key:'hora',     width:10 },
     { header:'Forma de pago', key:'payment', width:18 },
+    { header:'Tipo de cuenta', key:'account_type', width:20 },
+    { header:'Responsable', key:'account_name', width:28 },
+    { header:'Habitación', key:'account_room', width:14 },
     { header:'Nº comprobante', key:'reference', width:20 },
     { header:'Ítems',    key:'items',    width:44 },
     { header:'Total',    key:'total',    width:12 },
   ];
   ws2.getRow(1).font = { bold:true, color:{ argb:'FFFFFFFF' } };
   ws2.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
-  cierre.ventas.forEach((v, i) => ws2.addRow({
-    num: i+1, mesa:v.source === 'cuenta' ? `Hab. ${v.account_room || '-'}` : `Mesa ${v.mesa_numero || v.mesa_id}`, hora: v.hora, payment:v.payment_method || 'efectivo', reference:v.payment_reference || '',
-    items:    v.items.filter(it => it.status !== 'anulado').map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
-    total:    v.total,
-  }));
+  cierre.ventas.forEach((v, i) => {
+    const account = accountById[v.account_id];
+    const isAccount = v.payment_method === 'cuenta';
+    const accountType = v.account_type || account?.type || '';
+    const accountTypeLabels = { habitacion:'Cargo a habitación', propietario:'Consumo de propietario', otro:'Otro autorizado' };
+    ws2.addRow({
+      num:i+1, mesa:`Mesa ${v.mesa_numero || v.mesa_id || '-'}`, hora:v.hora,
+      payment:isAccount ? 'cuenta' : (v.payment_method || 'efectivo'),
+      account_type:isAccount ? (accountTypeLabels[accountType] || 'Cuenta') : '',
+      account_name:isAccount ? (v.account_name || account?.name || 'Sin identificar') : '',
+      account_room:isAccount ? (v.account_room || account?.room || 'No aplica') : '',
+      reference:v.payment_reference || '',
+      items:v.items.filter(it => it.status !== 'anulado').map(it => it.name + (it.qty > 1 ? ' x'+it.qty : '')).join(', '),
+      total:v.total,
+    });
+  });
   ws2.getColumn('total').numFmt = '$#,##0.00';
 
   // Hoja 3 — Top productos
@@ -1384,6 +1811,43 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   for (const payment of cierre.pagos_cuentas || []) ws5.addRow({ ...payment, amount:payment.amount });
   ws5.getColumn('amount').numFmt = '$#,##0.00';
 
+  const accountConsumptionColumns = [
+    { header:'Fecha', key:'fecha', width:14 }, { header:'Hora', key:'hora', width:12 },
+    { header:'Nombre', key:'account_name', width:30 }, { header:'Habitación', key:'room', width:14 },
+    { header:'Venta', key:'sale_id', width:10 }, { header:'Local', key:'location', width:16 },
+    { header:'Producto', key:'product', width:34 }, { header:'Cantidad', key:'quantity', width:12 },
+    { header:'Precio unitario', key:'unit_price', width:17 }, { header:'Subtotal', key:'subtotal', width:16 },
+  ];
+  const accountTypeLabels = { habitacion:'Huéspedes', propietario:'Propietarios', otro:'Otros autorizados' };
+  const accountRows = { habitacion:[], propietario:[], otro:[] };
+  const accountHeader = row => {
+    row.font = { bold:true, color:{ argb:'FFFFFFFF' } };
+    row.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFBA7517' } };
+  };
+  for (const sale of cierre.ventas || []) {
+    if (sale.payment_method !== 'cuenta') continue;
+    const account = accountById[sale.account_id];
+    const accountType = sale.account_type || account?.type;
+    if (!accountRows[accountType]) continue;
+    const accountName = sale.account_name || account?.name || 'Sin nombre';
+    const room = sale.account_room ?? account?.room ?? '';
+    for (const item of (sale.items || []).filter(item => item.status !== 'anulado')) {
+      accountRows[accountType].push({
+        fecha:sale.fecha, hora:sale.hora, account_name:accountName, room:room || 'No aplica',
+        sale_id:sale.id, location:sale.location_id, product:item.name, quantity:item.qty,
+        unit_price:item.price, subtotal:fmt(item.price * item.qty),
+      });
+    }
+  }
+  for (const [accountType, rows] of Object.entries(accountRows)) {
+    const sheet = wb.addWorksheet(`Consumos ${accountTypeLabels[accountType]}`);
+    sheet.columns = accountConsumptionColumns;
+    accountHeader(sheet.getRow(1));
+    rows.forEach(row => sheet.addRow(row));
+    sheet.getColumn('unit_price').numFmt = '$#,##0.00';
+    sheet.getColumn('subtotal').numFmt = '$#,##0.00';
+  }
+
   const ws6 = wb.addWorksheet('Inventario al cierre');
   ws6.columns = [
     { header:'Producto / insumo', key:'producto', width:38 },
@@ -1408,7 +1872,10 @@ app.get('/api/export/cierre/:id', async (req, res) => {
   ws6.views = [{ state:'frozen', ySplit:1 }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="cierre_${cierre.fecha.replace(/\//g,'-')}_${cierre.hora.replace(':','-')}.xlsx"`);
+  const safeClosingDate = String(cierre.fecha || '').replace(/[^0-9-]/g, '-').replace(/-+/g, '-');
+  const safeClosingTime = String(cierre.hora || '').replace(/[^0-9A-Za-z-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const closingFilename = `cierre_${safeClosingDate}_${safeClosingTime || cierre.id}.xlsx`;
+  res.setHeader('Content-Disposition', `attachment; filename="${closingFilename}"; filename*=UTF-8''${encodeURIComponent(closingFilename)}`);
   await polishWorkbook(wb, ['Resumen']);
   await wb.xlsx.write(res);
   res.end();
@@ -1569,13 +2036,22 @@ app.get('/api/export/accounts-pending/all', async (req, res) => {
   await wb.xlsx.write(res); res.end();
 });
 
+// ── Aplicación web de producción ──────────────────────────────
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST, { index:false, maxAge:'1h' }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+  });
+}
+
 // ── Arrancar ──────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Error interno. No se guardaron los cambios.' });
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`✅  River Paradise corriendo en http://localhost:${PORT}`);
-  console.log(`📁  Datos en: ${DB_FILE}`);
+app.listen(PORT, HOST, () => {
+  console.log(`✅  River Paradise corriendo en http://${HOST}:${PORT}`);
+  console.log(`📁  Base SQLite: ${SQLITE_DB_FILE}`);
 });

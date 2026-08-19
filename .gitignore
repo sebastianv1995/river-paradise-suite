@@ -5,6 +5,10 @@ dist/
 # Local operational database and temporary writes
 backend/river_paradise.json
 backend/river_paradise.json.tmp
+backend/river_paradise.sqlite
+backend/river_paradise.sqlite-shm
+backend/river_paradise.sqlite-wal
+backend/river_paradise.pre-sqlite-backup.json
 
 # Local configuration and logs
 .env
@@ -12,6 +16,7 @@ backend/river_paradise.json.tmp
 *.log
 impresion/config.json
 respaldos/
+backend/backups/
 npm-debug.log*
 
 # Editor and operating system files

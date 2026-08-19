@@ -23,6 +23,12 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
+call npm run build
+if %errorlevel% neq 0 (
+    echo ERROR: Fallo la compilacion del frontend.
+    pause
+    exit /b 1
+)
 cd ..
 
 echo.

@@ -3,11 +3,12 @@ import { printSaleReceipt } from '../utils/printTicket.js';
 
 const fmt = n => '$' + Number(n).toFixed(2);
 
-export default function Ventas({ location }) {
+export default function Ventas({ location, user }) {
   const [ventas,  setVentas]  = useState([]);
   const [loading, setLoading] = useState(true);
   const [fecha,   setFecha]   = useState('');
   const [printingId, setPrintingId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('es-EC', { day:'2-digit', month:'2-digit', year:'numeric' });
@@ -49,6 +50,22 @@ export default function Ventas({ location }) {
     } finally {
       setPrintingId(null);
     }
+  }
+
+  async function cancelSale(sale) {
+    if (!window.confirm(`¿Anular completamente la venta #${sale.id} por ${fmt(sale.total)}? El inventario será restituido.`)) return;
+    setCancellingId(sale.id);
+    try {
+      const response = await fetch(`/api/ventas/${sale.id}/cancel`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ reason:'Corrección de venta antes del cierre de caja' }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'No se pudo anular la venta');
+      await load(fecha, false);
+      window.alert('Venta anulada. No se incluirá en el cierre y el inventario fue restituido.');
+    } catch (error) { window.alert(error.message); }
+    finally { setCancellingId(null); }
   }
 
   return (
@@ -138,6 +155,13 @@ export default function Ventas({ location }) {
                 <button onClick={() => printSaleReceipt(v, location)} style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'#fff', fontSize:11, cursor:'pointer' }}>
                   Vista previa
                 </button>
+                {user?.role !== 'admin' ? <button disabled title="La anulación requiere permisos de administrador" style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'var(--bg2)', color:'var(--text3)', fontSize:11, cursor:'not-allowed' }}>🔒 Solo administrador</button> : v.cierre_id ? <button disabled title="Esta venta ya pertenece a un cierre de caja" style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'var(--bg2)', color:'var(--text3)', fontSize:11, cursor:'not-allowed' }}>
+                  🔒 Caja cerrada
+                </button> : v.payment_method === 'cuenta' ? <button disabled title="Los cargos pendientes se anulan desde Cuentas" style={{ padding:'6px 9px', border:'1px solid var(--border)', borderRadius:7, background:'var(--bg2)', color:'var(--text3)', fontSize:11, cursor:'not-allowed' }}>
+                  Anular desde Cuentas
+                </button> : <button disabled={cancellingId === v.id} onClick={() => cancelSale(v)} style={{ padding:'6px 9px', border:'1px solid var(--coral)', borderRadius:7, background:'var(--coral-light)', color:'var(--coral)', fontSize:11, cursor:'pointer' }}>
+                  {cancellingId === v.id ? 'Anulando…' : 'Anular venta'}
+                </button>}
                 <div style={{ fontWeight:600, fontSize:15, color:'var(--green)', whiteSpace:'nowrap' }}>{fmt(v.total)}</div>
               </div>
             </div>

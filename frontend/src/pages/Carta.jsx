@@ -83,10 +83,10 @@ export default function Carta() {
   }
 
   return (
-    <div className="page-container" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:900 }}>
+    <div className="page-container carta-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:900 }}>
       <div style={{ marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:600 }}>Actualizar carta</div>
-        <div style={{ fontSize:12, color:'var(--text2)' }}>Edita cada producto y guarda sus cambios individualmente.</div>
+        <div style={{ fontSize:18, fontWeight:600, color:'var(--green)' }}>Actualizar carta</div>
+        <div style={{ fontSize:12, color:'var(--text)' }}>Edita cada producto y guarda sus cambios individualmente.</div>
       </div>
 
       {message && <div style={{
@@ -96,7 +96,7 @@ export default function Carta() {
       }}>{message}</div>}
 
       <form onSubmit={createProduct} style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:14, marginBottom:20 }}>
-        <div style={{ fontSize:14, fontWeight:600, marginBottom:10 }}>Agregar nuevo producto</div>
+        <div style={{ fontSize:14, fontWeight:600, color:'var(--green)', marginBottom:10 }}>Agregar nuevo producto</div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr 100px', gap:8, marginBottom:8 }}>
           <label className="field-group"><span>Categoría</span><input list="menu-categories" required maxLength={80} value={newProduct.category} placeholder="Ej. Bebidas"
             onChange={e => setNewProduct(current => ({ ...current, category:e.target.value }))} style={fieldStyle}/></label>
@@ -144,7 +144,7 @@ export default function Carta() {
                       onChange={e => change(item.id, 'stock_min', e.target.value)} style={{ ...fieldStyle, width:48, padding:'5px' }}/>} </label></div>
                   <button onClick={() => save(item.id)} disabled={!changed || saving === item.id} style={{
                     border:'none', borderRadius:8, fontSize:12, fontWeight:500,
-                    background:changed ? 'var(--amber)' : 'var(--bg2)',
+                    background:changed ? 'var(--green)' : 'var(--bg2)',
                     color:changed ? '#fff' : 'var(--text3)',
                     cursor:changed ? 'pointer' : 'not-allowed',
                   }}>{saving === item.id ? 'Guardando…' : 'Guardar'}</button>

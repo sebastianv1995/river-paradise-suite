@@ -15,7 +15,7 @@ if %errorlevel% neq 0 (
   exit /b 1
 )
 netsh advfirewall firewall delete rule name="River Paradise - Red local" >nul 2>&1
-netsh advfirewall firewall add rule name="River Paradise - Red local" dir=in action=allow protocol=TCP localport=5173 profile=private
+netsh advfirewall firewall add rule name="River Paradise - Red local" dir=in action=allow protocol=TCP localport=8080 profile=private
 
 if %errorlevel% neq 0 (
   echo ERROR: No se pudo configurar el Firewall de Windows.
@@ -26,5 +26,5 @@ if %errorlevel% neq 0 (
 echo.
 echo Configuracion completada.
 echo Solo se habilito el acceso web en redes marcadas como Privadas.
-echo Al iniciar el sistema, usa la direccion Network mostrada por Vite.
+echo Acceso configurado para http://192.168.0.18:8080
 pause

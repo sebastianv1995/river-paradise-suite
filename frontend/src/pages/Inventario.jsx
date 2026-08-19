@@ -10,6 +10,8 @@ export default function Inventario() {
   const [adjustmentNotes, setAdjustmentNotes] = useState({});
   const [saving, setSaving] = useState(null);
   const [message, setMessage] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [stockFilter, setStockFilter] = useState('all');
 
   async function load() {
     const [inventoryResponse, movementsResponse] = await Promise.all([
@@ -35,6 +37,14 @@ export default function Inventario() {
   const totalStock = products.reduce((sum, product) => sum + product.stock, 0);
   const totalSold = products.reduce((sum, product) => sum + product.sold, 0);
   const lowStock = products.filter(product => product.stock <= product.stock_min).length;
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
+  const visibleProducts = products.filter(product => {
+    const matchesSearch = product.name.toLocaleLowerCase().includes(normalizedSearch);
+    const matchesStock = stockFilter === 'all'
+      || (stockFilter === 'low' && product.stock > 0 && product.stock <= product.stock_min)
+      || (stockFilter === 'empty' && product.stock <= 0);
+    return matchesSearch && matchesStock;
+  });
 
   async function addEntry(product) {
     setSaving(product.id);
@@ -134,15 +144,35 @@ export default function Inventario() {
         <SummaryCard label="Productos con stock bajo" value={lowStock} tone={lowStock ? 'coral' : 'green'} />
       </div>
 
+      <input
+        type="search"
+        value={searchTerm}
+        onChange={event => setSearchTerm(event.target.value)}
+        placeholder="Buscar producto"
+        aria-label="Buscar producto"
+        style={{ width:'100%', maxWidth:360, border:'1px solid var(--border)', borderRadius:8, padding:'9px 11px', background:'#fff', fontSize:13, marginBottom:6 }}
+      />
+
+      <div style={{ display:'flex', flexWrap:'wrap', gap:6, margin:'8px 0 4px' }}>
+        {[['all','Todos'], ['low','Stock bajo'], ['empty','Sin stock']].map(([value, label]) => (
+          <button key={value} type="button" onClick={() => setStockFilter(value)} style={{
+            padding:'7px 11px', border:`1px solid ${stockFilter === value ? 'var(--amber)' : 'var(--border)'}`,
+            borderRadius:7, background:stockFilter === value ? 'var(--amber-light)' : '#fff',
+            color:stockFilter === value ? 'var(--amber)' : 'var(--text2)', fontSize:11,
+            fontWeight:stockFilter === value ? 600 : 400,
+          }}>{label}</button>
+        ))}
+      </div>
+
       <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', margin:'18px 0 8px' }}>Bebidas y otros productos</div>
       <div className="inventory-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
-        {products.filter(product => product.inventory_section !== 'tabacos').map(renderProduct)}
+        {visibleProducts.filter(product => product.inventory_section !== 'tabacos').map(renderProduct)}
       </div>
 
       <div style={{ fontSize:14, fontWeight:700, color:'var(--amber)', textTransform:'uppercase', margin:'24px 0 4px' }}>Tabacos</div>
       <div style={{ fontSize:12, color:'var(--text2)', marginBottom:9 }}>Las entradas se registran por cajas; las ventas y existencias se controlan por cigarrillos individuales.</div>
       <div className="inventory-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
-        {products.filter(product => product.inventory_section === 'tabacos').map(renderProduct)}
+        {visibleProducts.filter(product => product.inventory_section === 'tabacos').map(renderProduct)}
       </div>
 
       <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', margin:'22px 0 8px' }}>Últimos movimientos</div>

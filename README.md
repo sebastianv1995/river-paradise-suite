@@ -12,31 +12,28 @@ Solo necesitas **Node.js** instalado. Ya lo tienes (v24.16.0).
 
 Doble clic en **`instalar.bat`**
 
-Esperar hasta que diga "Instalacion completada". No necesita compilar nada — listo en menos de un minuto.
+Esperar hasta que diga "Instalacion completada". El instalador prepara también la interfaz de producción.
 
 ---
 
 ## Usar el sistema cada día
 
-Doble clic en **`iniciar.bat`**
-
-Se abren dos ventanas negras y el navegador en http://localhost:5173.
-No cerrar las ventanas negras mientras uses el sistema.
-
-Para apagar: cerrar las dos ventanas negras.
+La primera vez, hacer clic derecho en **`configurar_servidor.bat`** y elegir
+**Ejecutar como administrador**. El sistema arrancará automáticamente con Windows,
+se reiniciará si el proceso falla y estará disponible en http://localhost:8080.
+`iniciar.bat` queda disponible para un inicio manual.
 
 ## Usar desde otra computadora o tablet
 
 1. En la computadora principal, hacer clic derecho sobre `configurar_red.bat` y
    elegir **Ejecutar como administrador**. Esto se hace una sola vez.
-2. Ejecutar `iniciar.bat` normalmente y mantener esta computadora encendida.
-3. En la ventana del frontend, copiar la dirección marcada como **Network**; por
-   ejemplo, `http://192.168.0.21:5173`.
+2. Mantener encendidos el servidor y el router de la red local.
+3. Abrir `http://192.168.0.18:8080`.
 4. Abrir esa dirección en la otra computadora o tablet.
 
 Los dispositivos deben poder comunicarse dentro de la misma red. Si un punto de
 acceso tiene activado aislamiento de clientes, el administrador de la red deberá
-desactivarlo. No es necesario abrir el puerto 3001 ni publicar el sistema en internet.
+desactivarlo. Solo se habilita el puerto 8080 en la red privada; no se publica el sistema en Internet.
 
 ## Restaurante y cafetería
 
@@ -51,22 +48,18 @@ inventario son compartidos. En **Reportes** se puede elegir un local o el report
 
 Los datos se guardan en:
 
-  backend\river_paradise.json
+  backend\river_paradise.sqlite
 
-Ese archivo contiene todas las ventas, cierres e historial.
-**Hacer una copia de ese archivo regularmente a un USB como respaldo.**
-
-Al descargar el proyecto por primera vez desde GitHub, el sistema crea
-`river_paradise.json` automÃ¡ticamente usando `river_paradise.seed.json`. La base
-inicial incluye el inventario confirmado de cafeterÃ­a y vinos, pero no contiene
-ventas, huÃ©spedes ni cierres privados. Después de creada, las actualizaciones del
-proyecto nunca reemplazan la base operativa.
+Ese archivo SQLite contiene las ventas, cierres, cuentas, inventario, usuarios y sesiones.
+La carta editable está en `menu.json`. El sistema genera copias lógicas diarias y
+después de cada cierre; también permite exportar y restaurar copias desde Seguridad.
+Las actualizaciones del programa nunca deben reemplazar esos archivos operativos.
 
 ---
 
 ## Flujo de trabajo diario
 
-1. Doble clic en iniciar.bat
+1. Abrir http://localhost:8080; el servidor ya inicia automáticamente con Windows
 2. Mesas  → abrir mesa → agregar ítems → cobrar → confirmar pago
 3. Ventas → ver resumen del día, exportar Excel si necesitas
 4. Cierre de caja → al final del día, ingresar fondo inicial → Cerrar caja
@@ -236,10 +229,12 @@ a la impresora prácticamente de inmediato dentro de la red local.
 
   river-paradise\
   ├── instalar.bat              ← Ejecutar solo la primera vez
-  ├── iniciar.bat               ← Ejecutar cada día
+  ├── configurar_servidor.bat   ← Ejecutar como administrador una sola vez
+  ├── iniciar.bat               ← Inicio manual opcional
+  ├── servidor.ps1              ← Supervisor automático del servidor
   ├── backend\
   │   ├── server.js             ← API completa
-  │   ├── river_paradise.json   ← Base de datos (NO borrar)
+  │   ├── river_paradise.sqlite ← Base de datos (NO borrar)
   │   └── package.json
   └── frontend\
       ├── src\

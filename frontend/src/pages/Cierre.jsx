@@ -49,7 +49,7 @@ function CierreDetalle({ cierre, onClose }) {
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <button onClick={printClosing} style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--green)', background:'var(--green-light)', color:'var(--green)', fontSize:12, cursor:'pointer' }}>Imprimir 2 copias</button>
-            <a href={`/api/export/cierre/${cierre.id}`} style={{
+            <a href={`/api/export/cierre/${cierre.id}`} download={`cierre_${cierre.fecha.replace(/\//g, '-')}.xlsx`} style={{
               padding:'6px 12px', borderRadius:8, border:`1px solid var(--border)`,
               fontSize:12, color:'var(--text2)', textDecoration:'none', fontWeight:500,
             }}>⬇ Excel</a>
@@ -72,7 +72,7 @@ function CierreDetalle({ cierre, onClose }) {
             <InfoRow label="Tarjeta"             value={fmt(tarjeta)} />
             <InfoRow label="Transferencia"       value={fmt(transferencia)} />
             <InfoRow label="Cargado a cuentas"  value={fmt(cierre.total_cuentas || 0)} />
-            <InfoRow label="Cobros de cuentas"  value={fmt(cierre.total_cobros_cuentas || 0)} />
+            <InfoRow label="Cobros de cuentas pendientes noche anterior" value={fmt(cierre.total_cobros_cuentas || 0)} />
             <InfoRow label="Ingresos de caja chica" value={fmt(cierre.total_ingresos_caja || 0)} />
             <InfoRow label="Egresos de caja chica" value={fmt(cierre.total_egresos_caja || 0)} />
             <div style={{
@@ -174,7 +174,7 @@ export default function Cierre({ location }) {
       fetch('/api/cierres').then(r => r.json()),
       fetch(`/api/ventas?fecha=${encodeURIComponent(today)}&location=${location}`).then(r => r.json()),
       fetch(`/api/cash-movements?fecha=${encodeURIComponent(today)}&location=${location}`).then(r => r.json()),
-      fetch('/api/accounts').then(r => r.json()),
+      fetch('/api/accounts?include_closed=1').then(r => r.json()),
     ]);
     setCierres(c);
     setAllClosings(all);
@@ -340,7 +340,7 @@ export default function Cierre({ location }) {
             ['💳 Tarjeta',         fmt(totalTarjeta)],
             ['↗ Transferencia',    fmt(totalTransferencia)],
             ['⌂ Cargado a cuentas', fmt(totalCuentas)],
-            ['✓ Cobros de cuentas', fmt(accountPayments.reduce((sum, payment) => sum + payment.amount, 0))],
+            ['✓ Cobros de cuentas pendientes noche anterior', fmt(accountPayments.reduce((sum, payment) => sum + payment.amount, 0))],
             ['+ Ingresos caja chica', fmt(cashIncomes)],
             ['− Egresos caja chica', fmt(cashExpenses)],
           ].map(([l,v]) => (
@@ -432,7 +432,7 @@ export default function Cierre({ location }) {
                         const result = await response.json().catch(() => ({}));
                         window.alert(response.ok ? 'Cierre enviado a impresión (2 copias).' : (result.error || 'No se pudo imprimir'));
                       }} style={{ padding:'5px 10px', borderRadius:7, border:'1px solid var(--green)', background:'var(--green-light)', color:'var(--green)', fontSize:12, cursor:'pointer' }}>Imprimir</button>
-                      <a href={`/api/export/cierre/${c.id}`} style={{
+                      <a href={`/api/export/cierre/${c.id}`} download={`cierre_${c.fecha.replace(/\//g, '-')}.xlsx`} style={{
                         padding:'5px 10px', borderRadius:7, border:`1px solid var(--border)`,
                         fontSize:12, color:'var(--text2)', textDecoration:'none',
                       }}>⬇ Excel</a>

@@ -3,24 +3,16 @@ echo ================================================
 echo   River Paradise - Sistema de Mesas
 echo ================================================
 echo.
-echo Abriendo backend y frontend...
+echo Abriendo River Paradise...
 echo.
 
-start "River Paradise - Backend" cmd /k "cd /d %~dp0backend && npm start"
-
-timeout /t 2 /nobreak > nul
-
-start "River Paradise - Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
-
+start "River Paradise - Servidor" /min powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "%~dp0servidor.ps1"
 timeout /t 3 /nobreak > nul
-
-start "" http://localhost:5173
+start "" http://localhost:8080
 
 echo Listo! El sistema se abrio en tu navegador.
 echo.
-echo Para abrir desde otra computadora o tablet usa la direccion Network
-echo que aparece en la ventana "River Paradise - Frontend".
-echo Ejemplo: http://192.168.1.50:5173
-echo Para cerrar: cierra las dos ventanas negras.
+echo Para abrir desde otra computadora o tablet usa:
+echo http://192.168.0.18:8080
 echo.
 pause

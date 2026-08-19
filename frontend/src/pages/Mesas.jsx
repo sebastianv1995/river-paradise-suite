@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { printKitchenTicket, printSaleReceipt } from '../utils/printTicket.js';
+import { printSaleReceipt } from '../utils/printTicket.js';
 
 const fmt = n => '$' + Number(n).toFixed(2);
 const api = async (url, opts) => {
@@ -27,16 +27,16 @@ function StatCard({ label, value }) {
 function TableCard({ mesa, selected, onClick }) {
   const colors = {
     libre:   { bg:'#fff',                border:'var(--border)',  dot:'#ccc',              text:'var(--text3)' },
-    ocupada: { bg:'var(--amber-light)',   border:'var(--amber)',   dot:'var(--amber-mid)',  text:'var(--amber)' },
-    pagando: { bg:'var(--green-light)',   border:'var(--green)',   dot:'var(--green-mid)',  text:'var(--green)' },
+    ocupada: { bg:'var(--green-light)',   border:'var(--green)',   dot:'var(--green-mid)',  text:'var(--green)' },
+    pagando: { bg:'rgba(124,203,91,.12)', border:'#7CCB5B',        dot:'#7CCB5B',           text:'#3B7D22' },
   };
   const c = colors[mesa.status];
   return (
     <div onClick={onClick} style={{
-      borderRadius:12, border: selected ? `2px solid var(--amber)` : `1px solid ${c.border}`,
+      borderRadius:12, border: selected ? `2px solid var(--green)` : `1px solid ${c.border}`,
       padding:'12px', cursor:'pointer', background:c.bg, position:'relative',
       transition:'transform 0.1s, box-shadow 0.1s',
-      boxShadow: selected ? '0 0 0 3px rgba(186,117,23,0.15)' : 'none',
+      boxShadow: selected ? '0 0 0 3px rgba(0,51,102,.15)' : 'none',
     }}
     onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'}
     onMouseLeave={e => e.currentTarget.style.transform='translateY(0)'}
@@ -62,8 +62,10 @@ function TableCard({ mesa, selected, onClick }) {
 function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
   const [addingId, setAddingId] = useState(null);
   const [lastAdded, setLastAdded] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const itemCount = orderItems.reduce((sum, item) => sum + item.qty, 0);
   const quantities = Object.fromEntries(orderItems.map(item => [item.item_id, item.qty]));
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
 
   async function handleAdd(item) {
     if (addingId) return;
@@ -84,9 +86,10 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
       <div style={{
         padding:'14px 16px', borderBottom:`1px solid var(--border)`,
         display:'flex', alignItems:'center', justifyContent:'space-between',
+        background:'#fff', color:'var(--text)',
       }}>
         <div>
-          <div style={{ fontWeight:600, fontSize:15 }}>Agregar ítems</div>
+          <div style={{ fontWeight:600, fontSize:15, color:'var(--green)' }}>Agregar ítems</div>
           <div style={{ fontSize:12, color:'var(--text2)' }}>Mesa {mesaNumber}</div>
         </div>
         <button onClick={onBack} style={{
@@ -97,8 +100,12 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
       {lastAdded && <div className="menu-added-feedback" role="status">
         <span>✓</span><div><strong>{lastAdded}</strong><small>Agregado al pedido</small></div>
       </div>}
+      <input type="search" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="Buscar producto" aria-label="Buscar producto" style={{ margin:'10px 16px 0', width:'calc(100% - 32px)', border:'1px solid var(--border)', borderRadius:7, padding:'7px 9px', fontSize:12 }} />
       <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:'12px 16px' }}>
-        {Object.entries(menu).map(([sec, items]) => (
+        {Object.entries(menu).map(([sec, items]) => {
+          const filteredItems = items.filter(item => `${item.name} ${item.desc || ''}`.toLocaleLowerCase().includes(normalizedSearch));
+          if (!filteredItems.length) return null;
+          return (
           <div key={sec}>
             <div style={{
               fontSize:11, fontWeight:600, color:'var(--text3)',
@@ -106,7 +113,7 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
               margin:'14px 0 8px', paddingBottom:4,
               borderBottom:`1px solid var(--border)`,
             }}>{sec}</div>
-            {items.map(item => {
+            {filteredItems.map(item => {
               const quantity = quantities[item.id] || 0;
               const isAdding = addingId === item.id;
               return <button type="button" key={item.id} disabled={Boolean(addingId)} onClick={() => handleAdd(item)} className={`menu-product ${isAdding ? 'is-adding' : ''} ${quantity ? 'in-order' : ''}`} style={{
@@ -128,7 +135,8 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
               </button>;
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
       <button type="button" onClick={onBack} className="menu-order-summary">
         <span>Ver pedido</span><strong>{itemCount} producto{itemCount === 1 ? '' : 's'} · {fmt(orderItems.reduce((sum, item) => sum + item.price * item.qty, 0))}</strong>
@@ -158,6 +166,7 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   const kitchenOrderSignature = JSON.stringify(mesa.items.map(item => [item.item_id, item.qty]));
   const kitchenSent = kitchenSentSignature === kitchenOrderSignature;
 
+  const accountCharge = paymentMethod.startsWith('cuenta_');
   function receiptPreview() {
     return {
       id:'PENDIENTE', mesa_id:mesa.id, mesa_numero:mesa.number || mesa.id,
@@ -242,9 +251,10 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   async function doCerrar(cobrado) {
     setLoading(true);
     try {
-      const response = await api(`/api/mesas/${mesa.id}/cerrar`, {
-        method:'POST', body:JSON.stringify({
-          cobrado, payment_method:paymentMethod, payment_reference:paymentReference,
+        const paymentType = accountCharge ? 'cuenta' : paymentMethod;
+        const response = await api(`/api/mesas/${mesa.id}/cerrar`, {
+          method:'POST', body:JSON.stringify({
+            cobrado, payment_method:paymentType, payment_reference:paymentReference,
           account_type:accountType, account_name:accountName, room, account_note:accountNote,
           invoice_requested:invoiceRequested, customer_name:customerName,
           customer_tax_id:customerTaxId, customer_city:customerCity,
@@ -282,13 +292,13 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
       }}>
         <div>
           <div style={{ fontWeight:600, fontSize:15 }}>Mesa {mesa.number || mesa.id}</div>
-          <div style={{ fontSize:12, color:'var(--text2)' }}>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,.72)' }}>
             {mesa.status === 'libre' ? 'Libre' : mesa.status === 'ocupada' ? `Ocupada · ${mesa.items.length} ítem(s)` : 'Pagando'}
           </div>
         </div>
         <button onClick={onClose} style={{
-          width:28, height:28, borderRadius:8, border:`1px solid var(--border)`,
-          background:'transparent', fontSize:16, color:'var(--text2)',
+          width:28, height:28, borderRadius:8, border:'1px solid rgba(255,255,255,.45)',
+          background:'rgba(255,255,255,.10)', fontSize:16, color:'#fff',
         }}>✕</button>
       </div>
 
@@ -332,6 +342,7 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
       {/* Footer */}
       <div className={mesa.status === 'pagando' ? 'payment-scroll-area' : ''} style={{
         padding:'14px 16px', borderTop:`1px solid var(--border)`,
+        background:'#F5F9FD',
         ...(mesa.status === 'pagando' ? { flex:'1 1 auto', minHeight:0, overflowY:'auto', overscrollBehavior:'contain' } : {}),
       }}>
         {mesa.status !== 'libre' && (
@@ -347,22 +358,19 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
         )}
 
         {mesa.status === 'libre' && (
-          <Btn onClick={doOpen} disabled={loading} color="amber">Abrir mesa</Btn>
+          <Btn onClick={doOpen} disabled={loading} color="green">Abrir mesa</Btn>
         )}
         {mesa.status === 'ocupada' && (<>
-          <Btn onClick={() => setShowMenu(true)} color="amber-outline" style={{ marginBottom:8 }}>
+          <Btn onClick={() => setShowMenu(true)} color="blue-outline" style={{ marginBottom:8 }}>
             + Agregar del menú
           </Btn>
           <Btn onClick={() => sendToKitchen(kitchenSent)} disabled={mesa.items.length === 0 || printingKitchen} color="ghost" style={{ marginBottom:8 }}>
             {printingKitchen ? 'Enviando a cocina…' : kitchenSent ? 'Reimprimir comanda' : 'Enviar comanda a cocina'}
           </Btn>
-          <Btn onClick={() => printKitchenTicket(mesa, location)} disabled={mesa.items.length === 0} color="ghost" style={{ marginBottom:8 }}>
-            Vista previa / imprimir en este dispositivo
-          </Btn>
-          <Btn onClick={doCobrar} disabled={total === 0 || loading} color="amber">
+          <Btn onClick={doCobrar} disabled={total === 0 || loading} color="green">
             Cobrar {fmt(total)}
           </Btn>
-          <Btn onClick={cancelOrder} disabled={loading} color="ghost" style={{ marginTop:6 }}>
+          <Btn onClick={cancelOrder} disabled={loading} color="danger-outline" style={{ marginTop:6 }}>
             Cancelar pedido
           </Btn>
         </>)}
@@ -374,28 +382,33 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
                 ['efectivo','💵','Efectivo'],
                 ['tarjeta','💳','Tarjeta'],
                 ['transferencia','↗','Transferencia'],
-                ['cuenta','⌂','Cargar a cuenta'],
+                ['cuenta_habitacion','⌂','Cargar a habitación'],
+                ['cuenta_propietario','◉','Consumo de propietario'],
+                ['cuenta_otro','◎','Otro autorizado'],
               ].map(([value, icon, label]) => (
-                <button key={value} onClick={() => setPaymentMethod(value)} className={`payment-option ${paymentMethod === value ? 'selected' : ''}`}>
+                <button key={value} onClick={() => {
+                  setPaymentMethod(value);
+                  if (value.startsWith('cuenta_')) setAccountType(value.replace('cuenta_', ''));
+                }} className={`payment-option ${paymentMethod === value ? 'selected' : ''}`}>
                   <span>{icon}</span><span>{label}</span>
                 </button>
               ))}
             </div>
             {paymentMethod && paymentMethod !== 'efectivo' && (
-              paymentMethod !== 'cuenta' &&
+              !accountCharge &&
               <label className="payment-reference">
                 <span>Número de comprobante <small>(opcional)</small></span>
                 <input value={paymentReference} maxLength={80} placeholder="Ej. 00458219"
                   onChange={event => setPaymentReference(event.target.value)} />
               </label>
             )}
-            {paymentMethod === 'cuenta' && <div className="account-charge-form">
-              <label><span>Tipo de cuenta</span><select value={accountType} onChange={e => setAccountType(e.target.value)}>
-                <option value="habitacion">Huésped / habitación</option><option value="propietario">Propietario</option><option value="otro">Otro autorizado</option>
-              </select></label>
-              {accountType === 'habitacion' && <label><span>Habitación</span><input value={room} maxLength={20} onChange={e => setRoom(e.target.value)} placeholder="Ej. 5" /></label>}
-              <label><span>Nombre del responsable</span><input value={accountName} maxLength={100} onChange={e => setAccountName(e.target.value)} placeholder="Nombre completo" /></label>
-              <label><span>Nota (opcional)</span><input value={accountNote} maxLength={150} onChange={e => setAccountNote(e.target.value)} placeholder="Detalle del cargo" /></label>
+            {accountCharge && <div className="account-charge-form">
+                <div style={{ gridColumn:'1 / -1', fontSize:11, color:'var(--amber)', fontWeight:600 }}>
+                  {accountType === 'habitacion' ? 'Cargo a habitación' : accountType === 'propietario' ? 'Consumo de propietario' : 'Consumo de otro autorizado'}
+                </div>
+                {accountType === 'habitacion' && <label><span>Habitación</span><input value={room} maxLength={20} onChange={e => setRoom(e.target.value)} placeholder="Ej. 5" /></label>}
+                <label><span>Nombre del responsable</span><input value={accountName} maxLength={100} onChange={e => setAccountName(e.target.value)} placeholder="Nombre completo" /></label>
+                <label><span>Nota (opcional)</span><input value={accountNote} maxLength={150} onChange={e => setAccountNote(e.target.value)} placeholder="Detalle del cargo" /></label>
             </div>}
             <div className="account-charge-form" style={{ marginTop:10 }}>
               <label style={{ display:'flex', flexDirection:'row', alignItems:'center', gap:7 }}>
@@ -408,9 +421,9 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
                 <label><span>Ciudad</span><input value={customerCity} maxLength={100} onChange={e => setCustomerCity(e.target.value)} placeholder="Ej. Tena" /></label>
               </>}
             </div>
-            <Btn onClick={() => doCerrar(true)} disabled={loading || !paymentMethod || (paymentMethod === 'cuenta' && (!accountName.trim() || (accountType === 'habitacion' && !room.trim()))) ||
+            <Btn onClick={() => doCerrar(true)} disabled={loading || !paymentMethod || (accountCharge && (!accountName.trim() || (accountType === 'habitacion' && !room.trim()))) ||
               (invoiceRequested && (!customerName.trim() || !/^(\d{10}|\d{13})$/.test(customerTaxId) || !customerCity.trim()))} color="green">
-              ✓ {paymentMethod === 'cuenta' ? 'Cargar consumo y liberar mesa' : `Confirmar ${paymentMethod ? `pago con ${paymentMethod}` : 'pago'}`}
+              ✓ {accountCharge ? 'Registrar consumo y liberar mesa' : `Confirmar ${paymentMethod ? `pago con ${paymentMethod}` : 'pago'}`}
             </Btn>
             <Btn onClick={() => printSaleReceipt(receiptPreview(), location)} disabled={mesa.items.length === 0} color="ghost" style={{ marginTop:7 }}>
               Imprimir consumo
@@ -434,8 +447,8 @@ function Row({ label, value }) {
 }
 
 const qtyBtnStyle = {
-  width:22, height:22, borderRadius:6, border:`1px solid var(--border)`,
-  background:'transparent', cursor:'pointer', fontSize:14, color:'var(--text2)',
+  width:22, height:22, borderRadius:6, border:'1px solid rgba(0,51,102,.22)',
+  background:'var(--green-light)', cursor:'pointer', fontSize:14, color:'#003366',
   display:'flex', alignItems:'center', justifyContent:'center',
 };
 
@@ -443,8 +456,10 @@ function Btn({ children, onClick, disabled, color, style={} }) {
   const styles = {
     amber:         { background:'var(--amber)',        color:'#fff',            border:'none' },
     'amber-outline':{ background:'var(--amber-light)', color:'var(--amber)',    border:`1px solid var(--amber)` },
+    'blue-outline': { background:'#fff', color:'#003366', border:'1px solid #003366' },
     green:         { background:'var(--green)',         color:'#fff',            border:'none' },
     ghost:         { background:'transparent',          color:'var(--text2)',   border:`1px solid var(--border)` },
+    'danger-outline':{ background:'#fff', color:'var(--coral)', border:'1px solid var(--coral)' },
   };
   return (
     <button onClick={onClick} disabled={disabled} style={{
@@ -524,7 +539,7 @@ export default function Mesas({ location }) {
 
         {/* Legend */}
         <div style={{ display:'flex', gap:14, marginBottom:12 }}>
-          {[['#ccc','Libre'],['var(--amber-mid)','Ocupada'],['var(--green-mid)','Pagando']].map(([c,l]) => (
+          {[['#ccc','Libre'],['var(--green-mid)','Ocupada'],['#7CCB5B','Pagando']].map(([c,l]) => (
             <span key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text2)' }}>
               <span style={{ width:8, height:8, borderRadius:'50%', background:c, display:'inline-block' }}/>
               {l}
