@@ -8,11 +8,13 @@ import CajaChica from './pages/CajaChica.jsx';
 import Reportes from './pages/Reportes.jsx';
 import Cuentas from './pages/Cuentas.jsx';
 import Seguridad from './pages/Seguridad.jsx';
+import Desayunos from './pages/Desayunos.jsx';
 
 const NAV = [
   { key:'mesas',      label:'Mesas',          icon:'▦', help:'Pedidos y atención' },
   { key:'ventas',     label:'Ventas',         icon:'◷', help:'Movimientos del día' },
   { key:'cuentas',    label:'Cuentas',        icon:'◎', help:'Huéspedes y propietarios' },
+  { key:'desayunos',  label:'Desayunos',      icon:'☀', help:'Control de huéspedes' },
   { key:'inventario', label:'Inventario',     icon:'▣', help:'Existencias y entradas' },
   { key:'caja',       label:'Caja chica',     icon:'$', help:'Ingresos y egresos' },
   { key:'cierre',     label:'Cierre de caja', icon:'✓', help:'Resumen financiero' },
@@ -108,6 +110,7 @@ export default function App() {
         {view === 'caja' && <CajaChica location={location} />}
         {view === 'reportes' && <Reportes initialLocation={location} />}
         {view === 'cuentas' && <Cuentas location={location} user={user} />}
+        {view === 'desayunos' && <Desayunos location={location} user={user} />}
         {view === 'seguridad' && <Seguridad user={user} onUserChange={setUser} />}
       </main>
     </div>

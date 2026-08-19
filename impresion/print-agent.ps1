@@ -8,6 +8,21 @@ Write-Host "Agente $($config.location) conectado a $($config.server_url)"
 while ($true) {
   $delayMilliseconds = 250
   try {
+    # Windows conserva el nombre de la impresora después de apagar o desconectar el USB.
+    # No se reclama una comanda hasta que el controlador vuelva a detectarla; así el
+    # trabajo permanece seguro en la cola central mientras arranca Windows o se conecta.
+    $printer = Get-Printer -Name ([string]$config.printer_name) -ErrorAction SilentlyContinue
+    if (-not $printer) {
+      Write-Warning "Esperando la impresora '$($config.printer_name)'..."
+      Start-Sleep -Seconds 3
+      continue
+    }
+    $offlineStatuses = @('Offline', 'Error', 'NotAvailable', 'NoToner', 'PaperJam', 'PaperOut', 'OutputBinFull', 'UserIntervention')
+    if ($offlineStatuses -contains [string]$printer.PrinterStatus) {
+      Write-Warning "Impresora no disponible ($($printer.PrinterStatus)). Se conserva la cola."
+      Start-Sleep -Seconds 3
+      continue
+    }
     $body = @{ location_id=$config.location; agent=$env:COMPUTERNAME } | ConvertTo-Json
     $uri = "$($config.server_url.TrimEnd('/'))/api/print-jobs/claim"
     try { $job = Invoke-RestMethod -Method Post -Uri $uri -ContentType 'application/json' -Body $body -TimeoutSec 10 }

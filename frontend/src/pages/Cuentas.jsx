@@ -176,8 +176,8 @@ export default function Cuentas({ location, user }) {
     finally { setSaving(false); }
   }
 
-  return <div className="page-container accounts-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
-    <div className="accounts-header"><div><div style={{ fontSize:18, fontWeight:600 }}>Cuentas pendientes</div><div style={{ fontSize:12, color:'var(--text2)' }}>Huéspedes, propietarios y personas autorizadas.</div></div><div className="pending-total"><span>Total pendiente</span><strong>{money(pendingTotal)}</strong></div></div>
+  return <div className="page-container accounts-page themed-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
+    <div className="accounts-header module-heading"><div><h2>Cuentas pendientes</h2><p>Huéspedes, propietarios y personas autorizadas.</p></div><div className="pending-total"><span>Total pendiente</span><strong>{money(pendingTotal)}</strong></div></div>
     {message && <div className={`account-message ${message.startsWith('Error') ? 'error' : ''}`}>{message}</div>}
     <div className="account-toolbar">
       <button className="active">Pendientes</button>

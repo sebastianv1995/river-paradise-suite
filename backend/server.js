@@ -50,6 +50,10 @@ function initialDB() {
       _nextAccountWriteoffId: 1,
       print_jobs: [],
       _nextPrintJobId: 1,
+      breakfast_days: [],
+      breakfast_settings: { unit_price:6 },
+      _nextBreakfastDayId: 1,
+      _nextBreakfastEntryId: 1,
   };
 }
 
@@ -74,6 +78,21 @@ function normalizeDB(db) {
   db._nextAccountWriteoffId ||= 1;
   db.print_jobs ||= [];
   db._nextPrintJobId ||= 1;
+  db.breakfast_days ||= [];
+  db.breakfast_settings ||= { unit_price:6 };
+  db.breakfast_settings.unit_price = fmtPositive(db.breakfast_settings.unit_price, 6);
+  db._nextBreakfastDayId ||= 1;
+  db._nextBreakfastEntryId ||= 1;
+  for (const day of db.breakfast_days) {
+    day.entries ||= [];
+    day.status ||= 'abierto';
+    day.settlement_status ||= 'pendiente';
+    for (const entry of day.entries) {
+      entry.included = Math.max(0, Number(entry.included) || 0);
+      entry.served = Math.max(0, Number(entry.served) || 0);
+      entry.unit_price = fmtPositive(entry.unit_price, db.breakfast_settings.unit_price);
+    }
+  }
   for (const mesa of db.mesas) {
     mesa.location_id ||= 'restaurante';
     mesa.number ||= mesa.id;
@@ -95,6 +114,11 @@ function normalizeDB(db) {
     for (const writeoff of account.writeoffs || []) writeoff.location_id ||= 'restaurante';
   }
   return db;
+}
+
+function fmtPositive(value, fallback=0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : fallback;
 }
 
 fs.mkdirSync(path.dirname(SQLITE_DB_FILE), { recursive:true });
@@ -831,6 +855,199 @@ app.post('/api/cash-movements', (req, res) => {
   saveDB(db);
   broadcastLive({ type:'cash', location_id:location });
   res.json(movement);
+});
+
+// ── DESAYUNOS DE HUÉSPEDES ───────────────────────────────────
+
+function breakfastDate(value) {
+  const text = String(value || '');
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(text)) return text;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const [year, month, day] = text.split('-');
+    return `${day}/${month}/${year}`;
+  }
+  return '';
+}
+
+function breakfastDayView(day) {
+  const entries = (day.entries || []).map(entry => ({
+    ...entry,
+    unused:Math.max(0, entry.included - entry.served),
+    additional:Math.max(0, entry.served - entry.included),
+    reimbursement:fmt(entry.included * entry.unit_price),
+  }));
+  return {
+    ...day, entries,
+    totals:{
+      included:entries.reduce((sum, entry) => sum + entry.included, 0),
+      served:entries.reduce((sum, entry) => sum + entry.served, 0),
+      unused:entries.reduce((sum, entry) => sum + entry.unused, 0),
+      additional:entries.reduce((sum, entry) => sum + entry.additional, 0),
+      reimbursement:fmt(entries.reduce((sum, entry) => sum + entry.reimbursement, 0)),
+    },
+  };
+}
+
+function findBreakfastDay(db, id, res) {
+  const day = db.breakfast_days.find(item => item.id === Number(id));
+  if (!day) res.status(404).json({ error:'Registro de desayunos no encontrado' });
+  return day;
+}
+
+app.get('/api/breakfasts', (req, res) => {
+  const db = loadDB();
+  const location = validLocation(req.query.location);
+  const fecha = breakfastDate(req.query.fecha) || todayStr();
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  const day = db.breakfast_days.find(item => item.location_id === location && item.fecha === fecha);
+  res.json({ day:day ? breakfastDayView(day) : null, settings:db.breakfast_settings });
+});
+
+app.get('/api/breakfasts/history', (req, res) => {
+  const db = loadDB();
+  const location = validLocation(req.query.location);
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  res.json(db.breakfast_days.filter(item => item.location_id === location).map(breakfastDayView).reverse().slice(0, 90));
+});
+
+app.put('/api/breakfasts/settings', requireAdmin, (req, res) => {
+  const db = loadDB();
+  const price = Number(req.body.unit_price);
+  if (!Number.isFinite(price) || price <= 0 || price > 100) return res.status(400).json({ error:'El precio debe estar entre $0.01 y $100.00' });
+  db.breakfast_settings.unit_price = fmt(price);
+  saveDB(db);
+  broadcastLive({ type:'breakfasts' });
+  res.json(db.breakfast_settings);
+});
+
+app.post('/api/breakfasts/open', (req, res) => {
+  const db = loadDB();
+  const location = validLocation(req.body.location_id);
+  const fecha = breakfastDate(req.body.fecha) || todayStr();
+  if (!location) return res.status(400).json({ error:'Local no válido' });
+  let day = db.breakfast_days.find(item => item.location_id === location && item.fecha === fecha);
+  if (!day) {
+    day = { id:db._nextBreakfastDayId++, fecha, location_id:location, status:'abierto', settlement_status:'pendiente',
+      entries:[], created_at:new Date().toISOString(), created_by:req.user.display_name };
+    db.breakfast_days.push(day); saveDB(db); broadcastLive({ type:'breakfasts', location_id:location });
+  }
+  res.status(201).json(breakfastDayView(day));
+});
+
+app.post('/api/breakfasts/:id/entries', (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  if (day.status !== 'abierto') return res.status(409).json({ error:'El desayuno del día ya fue finalizado' });
+  const room = String(req.body.room || '').trim().slice(0, 20);
+  const guest = String(req.body.guest_name || '').trim().slice(0, 100);
+  const included = Number(req.body.included);
+  if (!room || !guest) return res.status(400).json({ error:'Escribe la habitación y el huésped responsable' });
+  if (!Number.isInteger(included) || included < 1 || included > 50) return res.status(400).json({ error:'Los desayunos incluidos deben estar entre 1 y 50' });
+  const entry = { id:db._nextBreakfastEntryId++, room, guest_name:guest, included, served:0,
+    unit_price:db.breakfast_settings.unit_price, note:String(req.body.note || '').trim().slice(0, 180), created_at:new Date().toISOString() };
+  day.entries.push(entry); saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.status(201).json(breakfastDayView(day));
+});
+
+app.post('/api/breakfasts/:id/entries/:entryId/served', (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  if (day.status !== 'abierto') return res.status(409).json({ error:'El desayuno del día ya fue finalizado' });
+  const entry = day.entries.find(item => item.id === Number(req.params.entryId));
+  if (!entry) return res.status(404).json({ error:'Habitación no encontrada' });
+  const delta = Number(req.body.delta);
+  if (![1, -1].includes(delta)) return res.status(400).json({ error:'Ajuste no válido' });
+  entry.served = Math.max(0, entry.served + delta);
+  entry.updated_at = new Date().toISOString(); entry.updated_by = req.user.display_name;
+  saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.put('/api/breakfasts/:id/entries/:entryId', requireAdmin, (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  const entry = day.entries.find(item => item.id === Number(req.params.entryId));
+  if (!entry) return res.status(404).json({ error:'Habitación no encontrada' });
+  const included = Number(req.body.included); const served = Number(req.body.served);
+  if (!Number.isInteger(included) || included < 1 || included > 50 || !Number.isInteger(served) || served < 0 || served > 100) {
+    return res.status(400).json({ error:'Revisa las cantidades de desayunos' });
+  }
+  entry.room = String(req.body.room || '').trim().slice(0, 20);
+  entry.guest_name = String(req.body.guest_name || '').trim().slice(0, 100);
+  entry.included = included; entry.served = served;
+  entry.note = String(req.body.note || '').trim().slice(0, 180);
+  entry.updated_at = new Date().toISOString(); entry.updated_by = req.user.display_name;
+  if (!entry.room || !entry.guest_name) return res.status(400).json({ error:'Habitación y huésped son obligatorios' });
+  saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.delete('/api/breakfasts/:id/entries/:entryId', requireAdmin, (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  const index = day.entries.findIndex(item => item.id === Number(req.params.entryId));
+  if (index < 0) return res.status(404).json({ error:'Habitación no encontrada' });
+  day.entries.splice(index, 1); saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.post('/api/breakfasts/:id/close', (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  if (!day.entries.length) return res.status(400).json({ error:'Agrega al menos una habitación antes de finalizar' });
+  day.status = 'finalizado'; day.closed_at = new Date().toISOString(); day.closed_by = req.user.display_name;
+  saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.post('/api/breakfasts/:id/reopen', requireAdmin, (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  day.status = 'abierto'; day.reopened_at = new Date().toISOString(); day.reopened_by = req.user.display_name;
+  saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.post('/api/breakfasts/:id/settle', requireAdmin, (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  if (day.status !== 'finalizado') return res.status(409).json({ error:'Primero finaliza el desayuno del día' });
+  day.settlement_status = req.body.settled === false ? 'pendiente' : 'devuelto';
+  day.settled_at = day.settlement_status === 'devuelto' ? new Date().toISOString() : null;
+  day.settled_by = day.settlement_status === 'devuelto' ? req.user.display_name : null;
+  saveDB(db); broadcastLive({ type:'breakfasts', location_id:day.location_id });
+  res.json(breakfastDayView(day));
+});
+
+app.get('/api/breakfasts/:id/export', async (req, res) => {
+  const db = loadDB(); const day = findBreakfastDay(db, req.params.id, res);
+  if (!day) return;
+  const data = breakfastDayView(day); const wb = new ExcelJS.Workbook();
+  const summary = wb.addWorksheet('Resumen');
+  summary.columns = [{ header:'Concepto', key:'label', width:38 }, { header:'Valor', key:'value', width:24 }];
+  summary.addRows([
+    { label:'Fecha', value:data.fecha }, { label:'Local', value:data.location_id }, { label:'Estado', value:data.status },
+    { label:'Estado de devolución', value:data.settlement_status }, { label:'Desayunos incluidos', value:data.totals.included },
+    { label:'Desayunos servidos', value:data.totals.served }, { label:'No consumidos', value:data.totals.unused },
+    { label:'Adicionales', value:data.totals.additional }, { label:'TOTAL A DEVOLVER', value:data.totals.reimbursement },
+  ]);
+  summary.getCell('B10').numFmt = '$#,##0.00'; summary.getRow(10).font = { bold:true };
+  const detail = wb.addWorksheet('Detalle por habitación');
+  detail.columns = [
+    { header:'Habitación', key:'room', width:14 }, { header:'Huésped responsable', key:'guest', width:28 },
+    { header:'Incluidos', key:'included', width:12 }, { header:'Servidos', key:'served', width:12 },
+    { header:'No consumidos', key:'unused', width:15 }, { header:'Adicionales', key:'additional', width:13 },
+    { header:'Valor unitario', key:'price', width:16 }, { header:'A devolver', key:'total', width:16 },
+    { header:'Observación', key:'note', width:34 },
+  ];
+  for (const entry of data.entries) detail.addRow({ room:entry.room, guest:entry.guest_name, included:entry.included,
+    served:entry.served, unused:entry.unused, additional:entry.additional, price:entry.unit_price,
+    total:entry.reimbursement, note:entry.note || '' });
+  detail.getColumn('price').numFmt = '$#,##0.00'; detail.getColumn('total').numFmt = '$#,##0.00';
+  await polishWorkbook(wb, ['Resumen']);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="desayunos_huespedes_${data.fecha.replace(/\//g, '-')}.xlsx"`);
+  await wb.xlsx.write(res); res.end();
 });
 
 // ── CUENTAS PENDIENTES ────────────────────────────────────────

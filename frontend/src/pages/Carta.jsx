@@ -83,10 +83,10 @@ export default function Carta() {
   }
 
   return (
-    <div className="page-container carta-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:900 }}>
-      <div style={{ marginBottom:16 }}>
-        <div style={{ fontSize:18, fontWeight:600, color:'var(--green)' }}>Actualizar carta</div>
-        <div style={{ fontSize:12, color:'var(--text)' }}>Edita cada producto y guarda sus cambios individualmente.</div>
+    <div className="page-container carta-page themed-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
+      <div className="module-heading">
+        <div><h2>Actualizar carta</h2>
+        <p>Edita cada producto y guarda sus cambios individualmente.</p></div>
       </div>
 
       {message && <div style={{
@@ -95,9 +95,9 @@ export default function Carta() {
         color:message.startsWith('Error') ? 'var(--coral)' : 'var(--green-dark)',
       }}>{message}</div>}
 
-      <form onSubmit={createProduct} style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:14, marginBottom:20 }}>
+      <form className="product-create-card" onSubmit={createProduct} style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:14, marginBottom:20 }}>
         <div style={{ fontSize:14, fontWeight:600, color:'var(--green)', marginBottom:10 }}>Agregar nuevo producto</div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr 100px', gap:8, marginBottom:8 }}>
+        <div className="product-create-primary" style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr 100px', gap:8, marginBottom:8 }}>
           <label className="field-group"><span>Categoría</span><input list="menu-categories" required maxLength={80} value={newProduct.category} placeholder="Ej. Bebidas"
             onChange={e => setNewProduct(current => ({ ...current, category:e.target.value }))} style={fieldStyle}/></label>
           <datalist id="menu-categories">{Object.keys(menu).map(category => <option key={category} value={category}/>)}</datalist>
@@ -106,7 +106,7 @@ export default function Carta() {
           <label className="field-group"><span>Precio de venta ($)</span><input required type="number" min="0" max="9999.99" step="0.01" value={newProduct.price} placeholder="Ej. 1.50"
             onChange={e => setNewProduct(current => ({ ...current, price:e.target.value }))} style={fieldStyle}/></label>
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr auto 110px 100px', gap:8, alignItems:'end' }}>
+        <div className="product-create-secondary" style={{ display:'grid', gridTemplateColumns:'1fr auto 110px 100px', gap:8, alignItems:'end' }}>
           <label className="field-group"><span>Descripción (opcional)</span><input maxLength={300} value={newProduct.desc} placeholder="Ej. Botella personal de 500 ml"
             onChange={e => setNewProduct(current => ({ ...current, desc:e.target.value }))} style={fieldStyle}/></label>
           <label title="Márcalo para bebidas y productos que se cuentan por unidades" style={{ display:'flex', alignItems:'center', gap:6, paddingBottom:8, fontSize:12 }}><input type="checkbox" checked={newProduct.track_stock}
@@ -120,8 +120,8 @@ export default function Carta() {
       </form>
 
       {Object.entries(menu).map(([category, items]) => (
-        <section key={category} style={{ marginBottom:20 }}>
-          <div style={{ fontSize:13, fontWeight:600, color:'var(--amber)', marginBottom:8 }}>{category}</div>
+        <section className="menu-category" key={category} style={{ marginBottom:20 }}>
+          <div className="menu-category-title" style={{ fontSize:13, fontWeight:600, color:'var(--amber)', marginBottom:8 }}>{category}</div>
           <div className="product-edit-list" style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {items.map(item => {
               const draft = drafts[item.id] || item;

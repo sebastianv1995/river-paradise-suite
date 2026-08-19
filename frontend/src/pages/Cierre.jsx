@@ -261,7 +261,7 @@ export default function Cierre({ location }) {
     <>
       {detalle && <CierreDetalle cierre={detalle} onClose={() => setDetalle(null)} />}
 
-      <div className="closing-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:700 }}>
+      <div className="closing-page themed-page" style={{ padding:16, overflowY:'auto', flex:1, maxWidth:1050 }}>
 
         {msg && (
           <div style={{
@@ -273,10 +273,10 @@ export default function Cierre({ location }) {
         )}
 
         {/* Header */}
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <div className="module-heading closing-heading" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
           <div>
-            <div style={{ fontSize:16, fontWeight:600 }}>Cierre de caja</div>
-            <div style={{ fontSize:12, color:'var(--text2)' }}>{today}</div>
+            <h2>Cierre de caja</h2>
+            <p>Resumen financiero del {today}</p>
           </div>
           <button
             onClick={doCierre}
@@ -450,11 +450,11 @@ export default function Cierre({ location }) {
 
 function Card({ icon, title, children }) {
   return (
-    <div style={{
+    <div className="closing-card" style={{
       background:'#fff', border:`1px solid var(--border)`,
       borderRadius:12, marginBottom:14, overflow:'hidden',
     }}>
-      <div style={{
+      <div className="closing-card-title" style={{
         padding:'10px 16px', borderBottom:`1px solid var(--border)`,
         background:'var(--bg2)', display:'flex', alignItems:'center', gap:8,
       }}>

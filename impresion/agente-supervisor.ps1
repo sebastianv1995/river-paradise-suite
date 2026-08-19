@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 while ($true) {
   "$(Get-Date -Format s) Iniciando agente de impresión..." | Add-Content -LiteralPath $logFile
   try {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agent -ConfigPath $ConfigPath 2>&1 | Add-Content -LiteralPath $logFile
+    & powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File $agent -ConfigPath $ConfigPath 2>&1 | Add-Content -LiteralPath $logFile
   } catch {
     "$(Get-Date -Format s) ERROR: $($_.Exception.Message)" | Add-Content -LiteralPath $logFile
   }

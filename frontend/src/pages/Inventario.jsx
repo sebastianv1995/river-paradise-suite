@@ -114,22 +114,22 @@ export default function Inventario() {
         Se agregarán {Number(quantities[product.id]) * product.package_size} cigarrillos al inventario.
       </div>}
       <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', margin:'12px 0 5px' }}>Corregir stock por unidades</div>
-      <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 78px', gap:6 }}>
+      <div className="stock-entry-form stock-adjust-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 100px', gap:6 }}>
         <input aria-label={`Ajuste de ${product.name}`} type="number" step="1" placeholder="+ / −" value={adjustments[product.id] || ''}
           onChange={e => setAdjustments(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
         <input aria-label={`Motivo del ajuste de ${product.name}`} required maxLength={200} placeholder="Motivo obligatorio" value={adjustmentNotes[product.id] || ''}
           onChange={e => setAdjustmentNotes(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-        <button disabled={!Number.isInteger(Number(adjustments[product.id])) || Number(adjustments[product.id]) === 0 || !adjustmentNotes[product.id]?.trim() || saving === `adjust-${product.id}`}
+        <button className="stock-adjust-button" disabled={!Number.isInteger(Number(adjustments[product.id])) || Number(adjustments[product.id]) === 0 || !adjustmentNotes[product.id]?.trim() || saving === `adjust-${product.id}`}
           onClick={() => adjustStock(product)} style={{ ...buttonStyle, background:'var(--teal)' }}>{saving === `adjust-${product.id}` ? '…' : 'Ajustar'}</button>
       </div>
     </div>;
   }
 
   return (
-    <div className="page-container inventory-page" style={{ padding:16, overflowY:'auto', flex:1 }}>
-      <div style={{ marginBottom:14 }}>
-        <div style={{ fontSize:18, fontWeight:600 }}>Control de inventario</div>
-        <div style={{ fontSize:12, color:'var(--text2)' }}>Registra lo que llega; las ventas se descuentan al confirmar el pago.</div>
+    <div className="page-container inventory-page themed-page" style={{ padding:16, overflowY:'auto', flex:1 }}>
+      <div className="module-heading">
+        <div><h2>Control de inventario</h2>
+        <p>Registra lo que llega; las ventas se descuentan al confirmar el pago.</p></div>
       </div>
 
       {message && <div style={{
@@ -144,7 +144,7 @@ export default function Inventario() {
         <SummaryCard label="Productos con stock bajo" value={lowStock} tone={lowStock ? 'coral' : 'green'} />
       </div>
 
-      <input
+      <div className="inventory-tools"><input
         type="search"
         value={searchTerm}
         onChange={event => setSearchTerm(event.target.value)}
@@ -153,7 +153,7 @@ export default function Inventario() {
         style={{ width:'100%', maxWidth:360, border:'1px solid var(--border)', borderRadius:8, padding:'9px 11px', background:'#fff', fontSize:13, marginBottom:6 }}
       />
 
-      <div style={{ display:'flex', flexWrap:'wrap', gap:6, margin:'8px 0 4px' }}>
+      <div className="inventory-filters" style={{ display:'flex', flexWrap:'wrap', gap:6, margin:'8px 0 4px' }}>
         {[['all','Todos'], ['low','Stock bajo'], ['empty','Sin stock']].map(([value, label]) => (
           <button key={value} type="button" onClick={() => setStockFilter(value)} style={{
             padding:'7px 11px', border:`1px solid ${stockFilter === value ? 'var(--amber)' : 'var(--border)'}`,
@@ -162,7 +162,7 @@ export default function Inventario() {
             fontWeight:stockFilter === value ? 600 : 400,
           }}>{label}</button>
         ))}
-      </div>
+      </div></div>
 
       <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', margin:'18px 0 8px' }}>Bebidas y otros productos</div>
       <div className="inventory-grid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
@@ -205,4 +205,4 @@ function SummaryCard({ label, value, tone }) {
 }
 
 const inputStyle = { width:'100%', minWidth:0, border:'1px solid var(--border)', borderRadius:7, padding:'6px 8px', fontSize:12 };
-const buttonStyle = { border:'none', borderRadius:7, background:'var(--amber)', color:'#fff', fontSize:11, fontWeight:500 };
+const buttonStyle = { minWidth:100, minHeight:34, border:'none', borderRadius:7, background:'var(--amber)', color:'#fff', fontSize:11, fontWeight:500 };

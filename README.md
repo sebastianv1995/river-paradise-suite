@@ -1,5 +1,9 @@
 # River Paradise — Sistema de Mesas
 
+La guía recomendada para instalar el equipo servidor, la laptop del restaurante,
+el inicio automático y la impresión persistente está en
+**`INSTALACION_SERVIDOR_Y_RESTAURANTE.md`**.
+
 ---
 
 ## Requisitos
@@ -145,6 +149,16 @@ El botón **Descargar todas las pendientes** genera para recepción un Excel gen
 con todos los huéspedes que mantienen saldo, un resumen por habitación y una hoja
 adicional con el detalle de todos los productos consumidos.
 
+## Desayunos de huéspedes
+
+La pestaña **Desayunos** lleva un control independiente de las ventas y del cierre
+de caja. Permite registrar habitación, huésped responsable, desayunos incluidos y
+desayunos servidos; muestra no consumidos y adicionales y calcula cuánto debe
+devolver contabilidad usando el valor configurable vigente al crear el registro.
+Al finalizar el horario se cierra la jornada y se puede descargar un Excel propio.
+Un administrador puede corregir cantidades, reabrir la jornada y marcar la
+devolución como recibida. Estos valores no se suman a Ventas ni al Cierre de caja.
+
 ---
 
 ## Modificar el menú
@@ -203,14 +217,16 @@ crea un respaldo diario a las 23:30. Se conservan los últimos 30 respaldos en
 `respaldos`. La IP debe reservarse una sola vez desde el router para que los
 teléfonos y tablets mantengan siempre el mismo acceso directo.
 
-En la computadora de cada local, copiar el proyecto y ejecutar
-`impresion\configurar_agente.bat`. El asistente muestra las impresoras de Windows
+En la computadora de cada local, copiar el proyecto y ejecutar como administrador
+`impresion\configurar_agente.bat` una sola vez. El asistente muestra las impresoras de Windows
 y solicita: local (`restaurante` o `cafeteria`), dirección del servidor y nombre
 exacto de la impresora. Cada agente recoge solamente sus trabajos. Las comandas
 salen una vez y los comprobantes dos veces. Si la computadora o impresora no está
 disponible, el trabajo queda en la cola central para reintentarse.
 El agente consulta la cola cuatro veces por segundo para que las comandas lleguen
-a la impresora prácticamente de inmediato dentro de la red local.
+a la impresora prácticamente de inmediato dentro de la red local. La configuración
+queda guardada, el agente inicia oculto al entrar a Windows y espera automáticamente
+si la impresora USB todavía no ha sido conectada.
 
 ## Checklist de pruebas
 

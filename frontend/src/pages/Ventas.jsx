@@ -69,7 +69,11 @@ export default function Ventas({ location, user }) {
   }
 
   return (
-    <div className="sales-page" style={{ padding:16, overflowY:'auto', flex:1 }}>
+    <div className="sales-page themed-page" style={{ padding:16, overflowY:'auto', flex:1 }}>
+
+      <div className="module-heading">
+        <div><h2>Ventas del día</h2><p>Consulta cobros, comprobantes y movimientos registrados.</p></div>
+      </div>
 
       {/* Stats */}
       <div className="sales-stats" style={{ display:'flex', gap:10, marginBottom:16 }}>
@@ -88,7 +92,7 @@ export default function Ventas({ location, user }) {
       </div>
 
       {/* Export button */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+      <div className="module-toolbar" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
         <div style={{ fontSize:12, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>
           Ventas del {fecha}
         </div>
@@ -117,7 +121,7 @@ export default function Ventas({ location, user }) {
           No hay ventas registradas para esta fecha.
         </div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        <div className="themed-list" style={{ display:'flex', flexDirection:'column', gap:8 }}>
           {ventas.map((v, i) => (
             <div className="sale-row" key={v.id} style={{
               display:'flex', alignItems:'center', justifyContent:'space-between',
