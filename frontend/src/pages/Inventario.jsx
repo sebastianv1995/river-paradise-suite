@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 const fmtDate = value => new Date(value).toLocaleString('es-EC', { dateStyle:'short', timeStyle:'short' });
 
-export default function Inventario() {
+export default function Inventario({ user }) {
   const [products, setProducts] = useState([]);
   const [movements, setMovements] = useState([]);
   const [quantities, setQuantities] = useState({});
@@ -90,6 +90,7 @@ export default function Inventario() {
   function renderProduct(product) {
     const low = product.stock <= product.stock_min;
     const byBoxes = product.package_size > 1;
+    const canManageInventory = user?.role === 'admin';
     return <div className="inventory-card" key={product.id} style={{ background:'#fff', border:`1px solid ${low ? 'var(--coral)' : 'var(--border)'}`, borderRadius:12, padding:14 }}>
       <div style={{ display:'flex', justifyContent:'space-between', gap:10, marginBottom:10 }}>
         <div>
@@ -104,24 +105,28 @@ export default function Inventario() {
       <div style={{ display:'flex', gap:6, marginBottom:10 }}>
         <Metric label="Ingresaron" value={product.received}/><Metric label="Vendidos" value={product.sold}/><Metric label="Quedan" value={product.stock}/>
       </div>
-      <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', marginBottom:5 }}>{byBoxes ? 'Registrar entrada por cajas' : 'Registrar nueva entrada'}</div>
-      <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'1fr 100px', gap:6 }}>
-        <input aria-label={`Cantidad recibida de ${product.name}`} type="number" min="1" step="1" placeholder={byBoxes ? 'Nº de cajas' : 'Cantidad'} value={quantities[product.id] || ''}
-          onChange={e => setQuantities(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-        <button disabled={!Number(quantities[product.id]) || saving === product.id} onClick={() => addEntry(product)} style={buttonStyle}>{saving === product.id ? '…' : 'Ingresar'}</button>
-      </div>
-      {byBoxes && Number(quantities[product.id]) > 0 && <div style={{ fontSize:11, color:'var(--green)', marginTop:5 }}>
-        Se agregarán {Number(quantities[product.id]) * product.package_size} cigarrillos al inventario.
+      {canManageInventory ? <>
+        <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', marginBottom:5 }}>{byBoxes ? 'Registrar entrada por cajas' : 'Registrar nueva entrada'}</div>
+        <div className="stock-entry-form" style={{ display:'grid', gridTemplateColumns:'1fr 100px', gap:6 }}>
+          <input aria-label={`Cantidad recibida de ${product.name}`} type="number" min="1" step="1" placeholder={byBoxes ? 'Nº de cajas' : 'Cantidad'} value={quantities[product.id] || ''}
+            onChange={e => setQuantities(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+          <button disabled={!Number(quantities[product.id]) || saving === product.id} onClick={() => addEntry(product)} style={buttonStyle}>{saving === product.id ? '…' : 'Ingresar'}</button>
+        </div>
+        {byBoxes && Number(quantities[product.id]) > 0 && <div style={{ fontSize:11, color:'var(--green)', marginTop:5 }}>
+          Se agregarán {Number(quantities[product.id]) * product.package_size} cigarrillos al inventario.
+        </div>}
+        <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', margin:'12px 0 5px' }}>Corregir stock por unidades</div>
+        <div className="stock-entry-form stock-adjust-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 100px', gap:6 }}>
+          <input aria-label={`Ajuste de ${product.name}`} type="number" step="1" placeholder="+ / −" value={adjustments[product.id] || ''}
+            onChange={e => setAdjustments(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+          <input aria-label={`Motivo del ajuste de ${product.name}`} required maxLength={200} placeholder="Motivo obligatorio" value={adjustmentNotes[product.id] || ''}
+            onChange={e => setAdjustmentNotes(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
+          <button className="stock-adjust-button" disabled={!Number.isInteger(Number(adjustments[product.id])) || Number(adjustments[product.id]) === 0 || !adjustmentNotes[product.id]?.trim() || saving === `adjust-${product.id}`}
+            onClick={() => adjustStock(product)} style={{ ...buttonStyle, background:'var(--teal)' }}>{saving === `adjust-${product.id}` ? '…' : 'Ajustar'}</button>
+        </div>
+      </> : <div style={{ marginTop:10, padding:'8px 10px', borderRadius:8, background:'var(--bg2)', color:'var(--text3)', fontSize:11 }}>
+        Solo un administrador puede registrar entradas o corregir existencias.
       </div>}
-      <div style={{ fontSize:11, fontWeight:600, color:'var(--text2)', margin:'12px 0 5px' }}>Corregir stock por unidades</div>
-      <div className="stock-entry-form stock-adjust-form" style={{ display:'grid', gridTemplateColumns:'85px 1fr 100px', gap:6 }}>
-        <input aria-label={`Ajuste de ${product.name}`} type="number" step="1" placeholder="+ / −" value={adjustments[product.id] || ''}
-          onChange={e => setAdjustments(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-        <input aria-label={`Motivo del ajuste de ${product.name}`} required maxLength={200} placeholder="Motivo obligatorio" value={adjustmentNotes[product.id] || ''}
-          onChange={e => setAdjustmentNotes(current => ({ ...current, [product.id]:e.target.value }))} style={inputStyle}/>
-        <button className="stock-adjust-button" disabled={!Number.isInteger(Number(adjustments[product.id])) || Number(adjustments[product.id]) === 0 || !adjustmentNotes[product.id]?.trim() || saving === `adjust-${product.id}`}
-          onClick={() => adjustStock(product)} style={{ ...buttonStyle, background:'var(--teal)' }}>{saving === `adjust-${product.id}` ? '…' : 'Ajustar'}</button>
-      </div>
     </div>;
   }
 

@@ -124,7 +124,7 @@ export default function App() {
         {view === 'ventas' && <Ventas location={location} user={user} />}
         {view === 'cierre' && <Cierre location={location} />}
         {view === 'carta' && <Carta />}
-        {view === 'inventario' && <Inventario />}
+        {view === 'inventario' && <Inventario user={user} />}
         {view === 'caja' && <CajaChica location={location} />}
         {view === 'reportes' && <Reportes initialLocation={location} />}
         {view === 'cuentas' && <Cuentas location={location} user={user} />}

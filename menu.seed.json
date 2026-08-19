@@ -481,6 +481,33 @@
       "track_stock": true,
       "stock_min": 10,
       "inventory_only": true
+    },
+    {
+      "id": "inv_carmela",
+      "name": "Carmela",
+      "desc": "Producto exclusivo de inventario",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 1,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_imperial_toronja",
+      "name": "Toronja Imperial Lata",
+      "desc": "Producto exclusivo de inventario",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 3,
+      "inventory_only": true
+    },
+    {
+      "id": "inv_imperial_limon_menta",
+      "name": "Imperial limón y menta",
+      "desc": "Producto exclusivo de inventario",
+      "price": 0,
+      "track_stock": true,
+      "stock_min": 3,
+      "inventory_only": true
     }
   ]
 }

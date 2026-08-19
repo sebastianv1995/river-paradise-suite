@@ -210,6 +210,9 @@ function loadMenu() {
     { id:'inv_lomo_cerdo', name:'Lomo de cerdo', desc:'1 unidad por Lomo fino de cerdo', stock_min:2 },
     { id:'inv_camaron_porcion', name:'Camarón (porción)', desc:'1 por ceviche de camarón; 0,5 por ceviche mixto', stock_min:2 },
     { id:'inv_pescado_ceviche', name:'Pescado para ceviche (porción)', desc:'1 por ceviche de pescado; 0,5 por ceviche mixto', stock_min:2 },
+    { id:'inv_carmela', name:'Carmela', desc:'Producto exclusivo de inventario', stock_min:1 },
+    { id:'inv_imperial_toronja', name:'Toronja Imperial Lata', desc:'Producto exclusivo de inventario', stock_min:3 },
+    { id:'inv_imperial_limon_menta', name:'Imperial limón y menta', desc:'Producto exclusivo de inventario', stock_min:3 },
   ];
   menu['Insumos de inventario'] ||= [];
   for (const product of inventoryOnly) if (!byId[product.id]) {
@@ -760,7 +763,7 @@ app.get('/api/inventory/movements', (req, res) => {
   })));
 });
 
-app.post('/api/inventory/:itemId/entries', (req, res) => {
+app.post('/api/inventory/:itemId/entries', requireAdmin, (req, res) => {
   const db = loadDB();
   const product = Object.values(loadMenu()).flat().find(item => item.id === req.params.itemId && item.track_stock);
   const enteredQuantity = Number(req.body.quantity);
@@ -780,7 +783,7 @@ app.post('/api/inventory/:itemId/entries', (req, res) => {
   res.json({ ok:true, stock:stockFor(db, product.id), units_added:quantity });
 });
 
-app.post('/api/inventory/:itemId/adjustments', (req, res) => {
+app.post('/api/inventory/:itemId/adjustments', requireAdmin, (req, res) => {
   const db = loadDB();
   const product = Object.values(loadMenu()).flat().find(item => item.id === req.params.itemId && item.track_stock);
   const quantity = Number(req.body.quantity);
