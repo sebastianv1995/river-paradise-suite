@@ -40,6 +40,24 @@ export default function App() {
     }).catch(() => setUser(null)).finally(() => setAuthLoading(false));
   }, []);
 
+  useEffect(() => {
+    const updateViewportHeight = () => {
+      const height = window.visualViewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty('--app-height', `${Math.round(height)}px`);
+      document.documentElement.scrollLeft = 0;
+      document.body.scrollLeft = 0;
+    };
+    updateViewportHeight();
+    window.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('orientationchange', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('orientationchange', updateViewportHeight);
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+    };
+  }, []);
+
   async function submitLogin(event) {
     event.preventDefault(); setLoginError('');
     const response = await fetch('/api/auth/login', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(login) });

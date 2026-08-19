@@ -82,7 +82,7 @@ function MenuPanel({ mesaNumber, menu, orderItems, onAdd, onBack }) {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div className="order-panel-content" style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       <div style={{
         padding:'14px 16px', borderBottom:`1px solid var(--border)`,
         display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -284,9 +284,9 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
   );
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div className="order-panel-content" style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       {/* Header */}
-      <div style={{
+      <div className="order-panel-header" style={{
         padding:'14px 16px', borderBottom:`1px solid var(--border)`,
         display:'flex', alignItems:'center', justifyContent:'space-between',
       }}>
@@ -303,7 +303,7 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
       </div>
 
       {/* Items */}
-      <div style={{ flex:mesa.status === 'pagando' ? '0 1 150px' : 1, minHeight:0, overflowY:'auto', padding:'12px 16px' }}>
+      <div className="order-items" style={{ flex:mesa.status === 'pagando' ? '0 1 150px' : 1, minHeight:0, overflowY:'auto', padding:'12px 16px' }}>
         {mesa.items.length === 0 ? (
           <div style={{
             display:'flex', flexDirection:'column', alignItems:'center',
@@ -318,7 +318,7 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
             display:'flex', alignItems:'center', gap:8, padding:'8px 0',
             borderBottom:`1px solid var(--border)`,
           }}>
-            <div style={{ flex:1 }}>
+            <div style={{ flex:1, minWidth:0, overflowWrap:'anywhere' }}>
               <div style={{ fontSize:13 }}>{item.name}</div>
               <div style={{ fontSize:11, color:'var(--text3)' }}>{fmt(item.price)} c/u</div>
             </div>
@@ -340,7 +340,7 @@ function OrderPanel({ mesa, menu, location, onClose, onRefresh }) {
       </div>
 
       {/* Footer */}
-      <div className={mesa.status === 'pagando' ? 'payment-scroll-area' : ''} style={{
+      <div className={`order-footer ${mesa.status === 'pagando' ? 'payment-scroll-area' : ''}`} style={{
         padding:'14px 16px', borderTop:`1px solid var(--border)`,
         background:'#F5F9FD',
         ...(mesa.status === 'pagando' ? { flex:'1 1 auto', minHeight:0, overflowY:'auto', overscrollBehavior:'contain' } : {}),
@@ -520,6 +520,13 @@ export default function Mesas({ location }) {
   useEffect(() => {
     api('/api/menu').then(r => r.json()).then(setMenu).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (selected === null) return;
+    window.scrollTo(0, 0);
+    document.documentElement.scrollLeft = 0;
+    document.body.scrollLeft = 0;
+  }, [selected]);
 
   const libres   = mesas.filter(m => m.status === 'libre').length;
   const ocupadas = mesas.filter(m => m.status !== 'libre').length;
